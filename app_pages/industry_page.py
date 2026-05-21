@@ -3,22 +3,22 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
-from industry_rotation import build_industry_rotation_bundle, build_theme_member_display_df
-from industry_page_helpers import (
+from modules.industry.industry_rotation import build_industry_rotation_bundle, build_theme_member_display_df
+from modules.industry.industry_page_helpers import (
     build_combined_rotation_display_df,
     build_combined_rotation_series_df,
     build_combined_rotation_summary_df,
     build_market_tone_summary,
     render_summary_metric_card,
 )
-from industry_page_sections import (
+from modules.industry.industry_page_sections import (
     render_battle_room_tab,
     render_official_indices_tab,
     render_theme_members_tab,
 )
-from trading_calendar import resolve_recent_trade_date
-from ui_jobs import ensure_background_data_job, get_background_data_job_manager
-from ui_status import render_background_data_job_status
+from modules.core.trading_calendar import resolve_recent_trade_date
+from modules.ui.ui_jobs import ensure_background_data_job, get_background_data_job_manager
+from modules.ui.ui_status import render_background_data_job_status
 
 
 def render_industry_rotation_page(state):

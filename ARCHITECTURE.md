@@ -1,93 +1,146 @@
 # Trade Lab Architecture Notes
 
-## App Entry
+## Editing Rule
 
 - `main.py`
-  - Streamlit entrypoint
-  - Handles top-level navigation and shared dialogs
-
-## Page Layer
+  - Streamlit app entrypoint
+  - 負責主導航和頁面切換
 
 - `app_pages/`
-  - `home_page.py`: 首頁
-  - `industry_page.py`: 產業輪動頁入口
-  - `market_map_page.py`: 產業地圖頁 orchestration only
-  - `market_map_page_helpers.py`: 產業地圖 UI helpers、CSS、section renderers
-  - `research_page.py`, `news_page.py`, `stock_detail_page.py`, `backtest_page.py`, `active_etf_page.py`
+  - 頁面入口與 orchestration
+  - 想改頁面流程、版面組裝、頁面級互動，先看這裡
 
-## Market Map Layer
+- `modules/`
+  - 真正的功能實作本體
+  - 想改資料整理、查詢、業務邏輯、共用 UI，優先改這裡
 
-- `market_map_taxonomy.py`
-  - 台股題材與大類定義
+## Current Structure
 
-- `market_map_db.py`
-  - `market_map.db` schema setup
-  - taxonomy / assignment refresh
+### App Entry
 
-- `market_map_queries.py`
-  - page bundle assembly
-  - topic/group snapshot calculation
-  - market quote aggregation
+- `main.py`
 
-- `market_map_snapshot_store.py`
-  - cached snapshot read/write
-  - component snapshot normalization
+### Page Layer
 
-## Legacy / Existing Industry Layer
-
-- `industry_rotation.py`
-  - 舊產業輪動主流程
-
-- `industry_page_sections.py`
-  - 舊產業頁 UI sections
-
-- `industry_page_helpers.py`
-  - 舊產業頁 formatting / shared helpers
-
-- `industry_taxonomy.py`
-  - 舊產業分類定義
-
-## Data Sources
-
-- `stock_db.py`
-  - 台股主檔與公司資料
-
-- `market_watch.py`
-  - TWSE / TPEx quotes
-
-- `revenue_data.py`
-  - 月營收資料
-
-- `classification_refresh.py`, `classification_queries.py`
-  - 舊分類資料整理與查詢
-
-## Current Refactor Boundaries
-
+- `app_pages/home_page.py`
+- `app_pages/industry_page.py`
 - `app_pages/market_map_page.py`
-  - should stay thin
-  - only coordinate controls, selection state, and helper calls
-
 - `app_pages/market_map_page_helpers.py`
-  - owns market map presentation details
-  - safe place for future UI polish
+- `app_pages/research_page.py`
+- `app_pages/news_page.py`
+- `app_pages/stock_detail_page.py`
+- `app_pages/backtest_page.py`
+- `app_pages/active_etf_page.py`
 
-- `market_map_queries.py`
-  - should not take on snapshot persistence again
-  - focus on calculation and bundle assembly
+### Module Layer
 
-- `market_map_snapshot_store.py`
-  - single place for snapshot cache IO
+- `modules/core/`
+  - `app_constants.py`
+  - `http_utils.py`
+  - `internal_nav.py`
+  - `persistent_cache.py`
+  - `trading_calendar.py`
 
-## Next Good Cleanup Targets
+- `modules/data_sources/`
+  - `stock_db.py`
+  - `market_watch.py`
+  - `revenue_data.py`
+  - `broker_branch_data.py`
+  - `chip_data.py`
+  - `price_cache.py`
 
-1. `ui_backtest_charts.py`
-   - very large and likely wants chart-specific helper splitting
+- `modules/home/`
+  - `home_page_data.py`
+  - `home_page_sections.py`
+  - `homepage_brief.py`
 
-2. `industry_rotation.py`
-   - likely wants the same orchestration-vs-rendering split now used by market map
+- `modules/etf/`
+  - `active_etf_watch.py`
+  - `active_etf_history_store.py`
 
-3. `industry_taxonomy.py`
-   - may benefit from splitting raw taxonomy data from helper logic
+- `modules/market_map/`
+  - `market_map_db.py`
+  - `market_map_events.py`
+  - `market_map_queries.py`
+  - `market_map_snapshot_store.py`
+  - `market_map_taxonomy.py`
+  - `market_map_value_chain.py`
 
-4. `main.py`
-   - eventually move top nav config into a small registry structure if more pages are added
+- `modules/industry/`
+  - `industry_rotation.py`
+  - `industry_page_helpers.py`
+  - `industry_page_sections.py`
+  - `industry_taxonomy.py`
+  - `industry_utils.py`
+  - `classification_refresh.py`
+  - `classification_queries.py`
+  - `classification_exports.py`
+  - `company_links_db.py`
+
+- `modules/news/`
+  - `news_ai.py`
+  - `news_analysis.py`
+  - `news_common.py`
+  - `news_events.py`
+  - `news_market.py`
+
+- `modules/research/`
+  - `research_*`
+  - `transcript_*`
+
+- `modules/backtest/`
+  - `backtest_*`
+  - `strategy_*`
+  - `performance_metrics.py`
+  - `bowl_scoring.py`
+  - `func.py`
+
+- `modules/ui/`
+  - `ui_*`
+
+## Root Now Intentionally Small
+
+repo root 現在主要只留：
+
+- app 入口：`main.py`
+- 頁面資料夾：`app_pages/`
+- 功能模組：`modules/`
+- 部署 / 腳本 / web beta：`deploy/`, `scripts/`, `web_app/`
+- 文件與設定：`ARCHITECTURE.md`, `DEPLOYMENT.md`, `FIX_BACKLOG.md`, `.streamlit/`
+- 資料與快取：`*.db`, `industry_theme_overrides.csv`
+
+這樣多人協作時，不需要再從 root 滿滿同名檔案裡猜哪個才是真的實作。
+
+## Collaboration Guidance
+
+- 想改 ETF：
+  - 頁面流程看 `app_pages/active_etf_page.py`
+  - 資料邏輯看 `modules/etf/`
+
+- 想改首頁：
+  - `app_pages/home_page.py`
+  - `modules/home/`
+  - `modules/ui/`
+
+- 想改產業地圖：
+  - 頁面流程看 `app_pages/market_map_page.py`
+  - UI 細節看 `app_pages/market_map_page_helpers.py`
+  - 資料邏輯看 `modules/market_map/`
+
+- 想改舊產業輪動：
+  - `app_pages/industry_page.py`
+  - `modules/industry/`
+
+- 想改研究 / transcript：
+  - `app_pages/research_page.py`
+  - `modules/research/`
+
+- 想改回測：
+  - `app_pages/backtest_page.py`
+  - `modules/backtest/`
+
+- 想改共用資料來源：
+  - `modules/data_sources/`
+
+- 想改共用工具與導航：
+  - `modules/core/`

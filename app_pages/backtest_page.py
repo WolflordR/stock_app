@@ -1,9 +1,9 @@
 import streamlit as st
 
-from backtest_models import BacktestScanRequest
-from backtest_service import validate_backtest_request
-from ui_jobs import get_backtest_job_manager
-from ui_status import render_backtest_job_page_status
+from modules.backtest.backtest_models import BacktestScanRequest
+from modules.backtest.backtest_service import validate_backtest_request
+from modules.ui.ui_jobs import get_backtest_job_manager
+from modules.ui.ui_status import render_backtest_job_page_status
 
 
 def render_backtest_page(state):

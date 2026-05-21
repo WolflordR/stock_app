@@ -10,10 +10,10 @@ from app_pages import (
     render_research_page,
     render_stock_detail_page,
 )
-from internal_nav import sync_selected_view_query
-from ui_dialogs import render_buy_strategy_dialog, render_sell_strategy_dialog
-from ui_sidebar import render_sidebar
-from ui_state import ensure_strategy_state, initialize_session_state, load_secret_env
+from modules.core.internal_nav import sync_selected_view_query
+from modules.ui.ui_dialogs import render_buy_strategy_dialog, render_sell_strategy_dialog
+from modules.ui.ui_sidebar import render_sidebar
+from modules.ui.ui_state import ensure_strategy_state, initialize_session_state, load_secret_env
 
 
 st.set_option("client.showSidebarNavigation", False)

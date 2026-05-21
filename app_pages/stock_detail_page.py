@@ -2,10 +2,10 @@ from datetime import datetime, timedelta
 
 import streamlit as st
 
-from broker_branch_data import fetch_broker_branch_summary, fetch_broker_branch_trace
-from price_cache import get_price_cache_status
-from stock_db import find_security, get_stock_name
-from ui_backtest_results import render_stock_detail_workspace
+from modules.data_sources.broker_branch_data import fetch_broker_branch_summary, fetch_broker_branch_trace
+from modules.data_sources.price_cache import get_price_cache_status
+from modules.data_sources.stock_db import find_security, get_stock_name
+from modules.ui.ui_backtest_results import render_stock_detail_workspace
 
 
 @st.cache_data(show_spinner=False, ttl=1800)

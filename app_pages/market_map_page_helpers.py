@@ -8,8 +8,8 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-from internal_nav import navigate_to_stock_detail
-from market_map_value_chain import build_topic_value_chain
+from modules.core.internal_nav import navigate_to_stock_detail
+from modules.market_map.market_map_value_chain import build_topic_value_chain
 
 
 MARKET_MAP_CSS = """

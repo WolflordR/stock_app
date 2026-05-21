@@ -5,13 +5,13 @@ from textwrap import dedent
 import pandas as pd
 import streamlit as st
 
-from active_etf_history_store import load_etf_change_snapshot_items
-from active_etf_watch import refresh_all_active_etf_history_snapshots
-from internal_nav import navigate_to_active_etf
-from ui_data import load_active_etf_detail_data
-from ui_data import load_active_etf_overview_data
-from ui_jobs import ensure_background_data_job, get_background_data_job_manager
-from ui_status import render_background_data_job_status
+from modules.etf.active_etf_history_store import load_etf_change_snapshot_items
+from modules.etf.active_etf_watch import refresh_all_active_etf_history_snapshots
+from modules.core.internal_nav import navigate_to_active_etf
+from modules.ui.ui_data import load_active_etf_detail_data
+from modules.ui.ui_data import load_active_etf_overview_data
+from modules.ui.ui_jobs import ensure_background_data_job, get_background_data_job_manager
+from modules.ui.ui_status import render_background_data_job_status
 
 
 def _format_pct(value, digits=2):

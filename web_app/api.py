@@ -8,10 +8,10 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from active_etf_history_store import load_etf_change_snapshot_items
-from active_etf_watch import build_active_etf_detail_bundle
-from active_etf_watch import build_active_etf_overview_bundle
-from persistent_cache import load_or_compute_persistent_cache
+from modules.etf.active_etf_history_store import load_etf_change_snapshot_items
+from modules.etf.active_etf_watch import build_active_etf_detail_bundle
+from modules.etf.active_etf_watch import build_active_etf_overview_bundle
+from modules.core.persistent_cache import load_or_compute_persistent_cache
 
 
 BASE_DIR = Path(__file__).resolve().parent

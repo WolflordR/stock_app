@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import streamlit as st
 
-from internal_nav import navigate_to_market_map
-from market_map_db import ensure_market_map_db
-from market_map_db import refresh_market_map_db
-from market_map_queries import get_market_map_page_bundle
+from modules.core.internal_nav import navigate_to_market_map
+from modules.market_map.market_map_db import ensure_market_map_db
+from modules.market_map.market_map_db import refresh_market_map_db
+from modules.market_map.market_map_queries import get_market_map_page_bundle
 
 from .market_map_page_helpers import inject_market_map_css
 from .market_map_page_helpers import render_group_sidebar

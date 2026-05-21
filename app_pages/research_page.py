@@ -1,6 +1,6 @@
 import streamlit as st
 
-from research_page_candidates import render_research_candidate_tab
+from modules.research.research_page_candidates import render_research_candidate_tab
 
 
 def render_research_page(state):

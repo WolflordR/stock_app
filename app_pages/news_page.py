@@ -3,11 +3,11 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
-from news_analysis import build_news_analysis_bundle
-from trading_calendar import resolve_recent_trade_date
-from ui_display import format_company_link_badges, render_reaction_metrics
-from ui_jobs import ensure_background_data_job, get_background_data_job_manager
-from ui_status import render_background_data_job_status
+from modules.news.news_analysis import build_news_analysis_bundle
+from modules.core.trading_calendar import resolve_recent_trade_date
+from modules.ui.ui_display import format_company_link_badges, render_reaction_metrics
+from modules.ui.ui_jobs import ensure_background_data_job, get_background_data_job_manager
+from modules.ui.ui_status import render_background_data_job_status
 
 
 def render_news_page(state):
