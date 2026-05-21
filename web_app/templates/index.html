@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Trade Lab Web Beta</title>
+  <style>
+    :root {
+      --bg: #020617;
+      --panel: rgba(15, 23, 42, 0.92);
+      --panel-soft: rgba(30, 41, 59, 0.82);
+      --border: rgba(148, 163, 184, 0.18);
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --accent: #60a5fa;
+      --violet: #7c3aed;
+      --cyan: #06b6d4;
+      --green: #22c55e;
+      --red: #f43f5e;
+      --amber: #f59e0b;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(124,58,237,0.16), transparent 20%),
+        radial-gradient(circle at top right, rgba(6,182,212,0.14), transparent 18%),
+        linear-gradient(180deg, #030712 0%, #020617 100%);
+      color: var(--text);
+      min-height: 100vh;
+    }
+    .shell {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 32px 20px 60px;
+    }
+    .nav {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 18px;
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      background: rgba(15,23,42,0.72);
+      backdrop-filter: blur(18px);
+      margin-bottom: 22px;
+    }
+    .title {
+      font-size: 28px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+    }
+    .subtitle {
+      color: var(--muted);
+      font-size: 14px;
+      margin-top: 4px;
+    }
+    .hero, .panel {
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      background: var(--panel);
+      backdrop-filter: blur(18px);
+      padding: 24px;
+      margin-bottom: 18px;
+    }
+    .hero h2, .panel h3 {
+      margin: 0 0 8px;
+    }
+    .muted {
+      color: var(--muted);
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 16px;
+      margin-top: 18px;
+    }
+    .overview-grid {
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    }
+    .etf-card, .card, .holding-card {
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      background: var(--panel-soft);
+      padding: 18px;
+      cursor: pointer;
+      transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease;
+      color: var(--text);
+      width: 100%;
+      text-align: left;
+    }
+    .etf-card:hover, .card:hover, .holding-card:hover {
+      transform: translateY(-2px);
+      border-color: rgba(96,165,250,0.55);
+      box-shadow: 0 0 0 1px rgba(96,165,250,0.16), 0 14px 32px rgba(0,0,0,0.28);
+    }
+    .etf-card-top, .holding-card-top, .section-head, .detail-header, .timeline-head, .detail-title-row, .metric-row, .industry-row, .change-row, .change-panel-head, .etf-card-footer {
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      align-items: center;
+    }
+    .card-code {
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    .card-name {
+      font-size: 22px;
+      font-weight: 800;
+      margin-bottom: 8px;
+    }
+    .pill {
+      display: inline-block;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(59,130,246,0.16);
+      color: #bfdbfe;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      padding: 7px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.06);
+    }
+    .tag-violet {
+      color: #ddd6fe;
+      background: rgba(124,58,237,0.16);
+    }
+    .tag-cyan {
+      color: #cffafe;
+      background: rgba(6,182,212,0.16);
+    }
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+      margin-top: 18px;
+    }
+    .summary-card, .subpanel, .timeline-shell, .change-panel {
+      border: 1px solid var(--border);
+      background: rgba(17, 24, 39, 0.72);
+      border-radius: 20px;
+      padding: 18px;
+    }
+    .metric-label {
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 8px;
+    }
+    .metric-value {
+      font-size: 42px;
+      font-weight: 800;
+      letter-spacing: -0.04em;
+    }
+    .metric-value.sm {
+      font-size: 30px;
+    }
+    .metric-block.right {
+      text-align: right;
+    }
+    .eyebrow {
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 6px;
+    }
+    .section-head h3, .section-head h4 {
+      margin: 0;
+    }
+    .detail-header {
+      flex-wrap: wrap;
+      margin-bottom: 22px;
+    }
+    .detail-body {
+      margin-top: 8px;
+    }
+    .detail-title-row {
+      justify-content: flex-start;
+      margin: 10px 0 8px;
+      flex-wrap: wrap;
+    }
+    .detail-title-row h3 {
+      margin: 0;
+      font-size: 36px;
+      letter-spacing: -0.04em;
+    }
+    .detail-code {
+      font-size: 28px;
+      font-weight: 800;
+      color: #cbd5e1;
+    }
+    .detail-tabs {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .tab-btn, .ghost-btn {
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: rgba(15, 23, 42, 0.88);
+      color: var(--text);
+      padding: 10px 16px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all .2s ease;
+    }
+    .tab-btn.active, .tab-btn:hover, .ghost-btn:hover {
+      border-color: rgba(96,165,250,0.55);
+      box-shadow: 0 0 0 1px rgba(96,165,250,0.18);
+      background: rgba(30, 41, 59, 0.92);
+    }
+    .ghost-btn {
+      margin-bottom: 10px;
+    }
+    .perf-grid .summary-card.up .metric-value,
+    .up {
+      color: var(--red);
+    }
+    .perf-grid .summary-card.down .metric-value,
+    .down {
+      color: var(--green);
+    }
+    .perf-grid .summary-card.neutral .metric-value,
+    .neutral {
+      color: #cbd5e1;
+    }
+    .tone-new .metric-value, .new {
+      color: var(--amber);
+    }
+    .tone-up .metric-value {
+      color: var(--red);
+    }
+    .tone-down .metric-value {
+      color: var(--green);
+    }
+    .tone-neutral .metric-value, .muted-tone {
+      color: #94a3b8;
+    }
+    .etf-card-performance {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 16px;
+    }
+    .perf-chip {
+      border-radius: 999px;
+      padding: 8px 11px;
+      font-size: 12px;
+      font-weight: 700;
+      background: rgba(255,255,255,0.06);
+      color: #e2e8f0;
+    }
+    .perf-chip.up {
+      background: rgba(244,63,94,0.14);
+      color: #fda4af;
+    }
+    .perf-chip.down {
+      background: rgba(34,197,94,0.14);
+      color: #86efac;
+    }
+    .etf-card-footer {
+      margin-top: 18px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .holdings-grid {
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    }
+    .holding-weight {
+      font-size: 22px;
+      font-weight: 800;
+    }
+    .holding-name {
+      font-size: 20px;
+      font-weight: 800;
+      margin-bottom: 6px;
+    }
+    .industry-stack {
+      display: grid;
+      gap: 12px;
+      margin-top: 18px;
+    }
+    .industry-row {
+      padding: 14px 16px;
+      border: 1px solid rgba(148, 163, 184, 0.12);
+      border-radius: 16px;
+      background: rgba(30, 41, 59, 0.36);
+    }
+    .industry-row-left, .industry-row-right, .timeline-dots, .change-row-left, .change-row-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .industry-row-right {
+      color: #cbd5e1;
+      font-weight: 700;
+    }
+    .industry-dot, .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.22);
+      display: inline-block;
+    }
+    .dot.new { background: var(--amber); }
+    .dot.up { background: var(--red); }
+    .dot.down { background: var(--green); }
+    .dot.neutral { background: #94a3b8; }
+    .timeline-shell {
+      margin-top: 18px;
+    }
+    .timeline-scroll {
+      display: flex;
+      gap: 12px;
+      overflow-x: auto;
+      padding: 6px 2px 4px;
+      margin-top: 16px;
+      scrollbar-width: thin;
+    }
+    .timeline-card {
+      min-width: 112px;
+      border-radius: 18px;
+      border: 1px solid rgba(148, 163, 184, 0.16);
+      background: rgba(30, 41, 59, 0.58);
+      color: var(--text);
+      padding: 14px 12px;
+      cursor: pointer;
+      transition: all .2s ease;
+    }
+    .timeline-card.active, .timeline-card:hover {
+      border-color: rgba(96,165,250,0.65);
+      background: linear-gradient(180deg, rgba(96,165,250,0.34), rgba(30,41,59,0.92));
+      box-shadow: 0 0 0 1px rgba(96,165,250,0.18);
+    }
+    .timeline-date {
+      font-size: 28px;
+      font-weight: 800;
+      letter-spacing: -0.04em;
+    }
+    .timeline-weekday, .timeline-total {
+      color: #cbd5e1;
+      margin-top: 8px;
+      font-weight: 700;
+    }
+    .timeline-dots {
+      margin-top: 12px;
+      justify-content: center;
+      min-height: 16px;
+    }
+    .date-range-grid, .changes-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+      margin-top: 18px;
+    }
+    .change-panel-head {
+      font-size: 20px;
+      font-weight: 800;
+      padding-bottom: 12px;
+      border-bottom: 1px solid rgba(148,163,184,0.12);
+    }
+    .change-panel-head.up {
+      color: #fda4af;
+    }
+    .change-panel-head.down {
+      color: #86efac;
+    }
+    .change-list {
+      margin-top: 6px;
+    }
+    .change-row {
+      padding: 14px 0;
+      border-bottom: 1px solid rgba(148,163,184,0.12);
+      align-items: flex-start;
+    }
+    .change-row:last-child {
+      border-bottom: none;
+    }
+    .change-row-left {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+    .change-row-right {
+      flex-direction: column;
+      align-items: flex-end;
+      min-width: 120px;
+      font-weight: 800;
+    }
+    .change-row-weight {
+      min-width: 64px;
+      font-size: 28px;
+      font-weight: 800;
+      letter-spacing: -0.04em;
+    }
+    .change-row-name {
+      font-size: 20px;
+      font-weight: 800;
+      margin-bottom: 4px;
+    }
+    .empty-state {
+      color: var(--muted);
+      padding: 18px 4px 4px;
+    }
+    #app {
+      min-height: 240px;
+    }
+    @media (max-width: 860px) {
+      .detail-tabs, .detail-header, .section-head, .etf-card-top, .metric-row, .etf-card-footer, .change-row {
+        align-items: flex-start;
+      }
+      .date-range-grid, .changes-grid {
+        grid-template-columns: 1fr;
+      }
+      .detail-title-row h3 {
+        font-size: 28px;
+      }
+      .detail-code {
+        font-size: 22px;
+      }
+      .timeline-card {
+        min-width: 100px;
+      }
+      .change-row {
+        flex-direction: column;
+      }
+      .change-row-right {
+        align-items: flex-start;
+        min-width: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="nav">
+      <div>
+        <div class="title">Trade Lab Web Beta</div>
+        <div class="subtitle">先從主動 ETF 開始搬到 HTML 前端</div>
+      </div>
+      <div class="pill">Same-tab Router</div>
+    </div>
+
+    <div class="hero">
+      <h2>HTML 前端遷移骨架</h2>
+      <div class="muted">
+        這是和 Streamlit 並行的前端入口。現在先接 `主動ETF` API，後面可以慢慢把產業地圖、個股頁搬過來。
+      </div>
+    </div>
+
+    <div id="app" class="panel">
+      <h3>載入中</h3>
+      <div class="muted">正在讀取主動 ETF 資料...</div>
+    </div>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+[Unit]
+Description=Trade Lab Streamlit App
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tradeapp
+Group=tradeapp
+WorkingDirectory=/opt/trade-app
+Environment=PYTHONUNBUFFERED=1
+Environment=OPENAI_API_KEY=
+Environment=OPENAI_NEWS_MODEL=
+ExecStart=/opt/trade-app/stock_env/bin/streamlit run /opt/trade-app/main.py --server.address 127.0.0.1 --server.port 8540
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target

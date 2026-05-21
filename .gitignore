@@ -1,0 +1,15 @@
+.DS_Store
+__pycache__/
+.pycache_tmp/
+stock_env/
+*.pyc
+*.pyo
+*.pyd
+
+ui_persistent_cache.db
+price_cache.db
+revenue_cache.db
+chip_cache.db
+active_etf_history.db
+
+.streamlit/secrets.toml
