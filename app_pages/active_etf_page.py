@@ -138,6 +138,33 @@ def _inject_active_etf_css():
             color: #f8fafc;
             text-align: center;
         }
+        div[data-testid="stButton"] button[kind="tertiary"] {
+            background: transparent !important;
+            border: 0 !important;
+            box-shadow: none !important;
+            padding: 0 !important;
+            min-height: auto !important;
+            color: #f8fafc !important;
+            justify-content: flex-start !important;
+            font-size: 1.35rem !important;
+            font-weight: 800 !important;
+            line-height: 1.2 !important;
+        }
+        div[data-testid="stButton"] button[kind="tertiary"]:hover {
+            background: transparent !important;
+            color: #ffffff !important;
+            text-decoration: underline;
+            text-decoration-color: rgba(255,255,255,0.38);
+            text-underline-offset: 0.18rem;
+        }
+        div[data-testid="stButton"] button[kind="tertiary"]:focus,
+        div[data-testid="stButton"] button[kind="tertiary"]:focus-visible,
+        div[data-testid="stButton"] button[kind="tertiary"]:active {
+            background: transparent !important;
+            border: 0 !important;
+            box-shadow: none !important;
+            color: #ffffff !important;
+        }
         .active-etf-list-value.positive { color: #f43f5e; }
         .active-etf-list-value.negative { color: #22c55e; }
         .active-etf-list-value.muted { color: #94a3b8; }
@@ -329,56 +356,6 @@ def _inject_active_etf_css():
             background: rgba(100, 116, 139, 0.65);
             border-radius: 999px;
         }
-        .active-etf-date-card {
-            min-width: 5.6rem;
-            text-decoration: none !important;
-            border-radius: 1rem;
-            border: 1px solid rgba(148, 163, 184, 0.18);
-            background: rgba(39, 51, 74, 0.78);
-            padding: 0.8rem 0.65rem 0.7rem 0.65rem;
-            color: #cbd5e1;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            transition: all 220ms ease;
-        }
-        .active-etf-date-card:hover {
-            border-color: rgba(191, 219, 254, 0.55);
-            transform: translateY(-1px);
-        }
-        .active-etf-date-card.active {
-            background: linear-gradient(180deg, rgba(59, 130, 246, 0.88), rgba(96, 165, 250, 0.94));
-            color: #ffffff;
-            border-color: rgba(255, 255, 255, 0.74);
-            box-shadow: 0 0 0 2px rgba(255,255,255,0.08) inset;
-        }
-        .active-etf-date-card.current {
-            border-color: rgba(255, 255, 255, 0.86);
-        }
-        .active-etf-date-main {
-            font-size: 1.05rem;
-            font-weight: 900;
-            line-height: 1.05;
-        }
-        .active-etf-date-week {
-            margin-top: 0.28rem;
-            font-size: 0.82rem;
-            opacity: 0.88;
-        }
-        .active-etf-date-dots {
-            display: flex;
-            gap: 0.3rem;
-            margin-top: 0.55rem;
-            min-height: 0.85rem;
-            align-items: center;
-        }
-        .active-etf-date-total {
-            margin-top: 0.36rem;
-            font-size: 0.95rem;
-            font-weight: 800;
-            opacity: 0.95;
-        }
         div[data-testid="stRadio"] [role="radiogroup"] {
             display: flex;
             flex-wrap: nowrap;
@@ -407,25 +384,69 @@ def _inject_active_etf_css():
             justify-content: center !important;
             text-align: center;
             flex: 0 0 auto;
+            position: relative;
+            cursor: pointer !important;
+            transition: background 180ms ease, border-color 180ms ease, transform 180ms ease, box-shadow 180ms ease, color 180ms ease !important;
         }
-        div[data-testid="stRadio"] [role="radiogroup"] label[data-checked="true"] {
+        div[data-testid="stRadio"] [role="radiogroup"] label:hover {
+            background: rgba(49, 64, 92, 0.92) !important;
+            border-color: rgba(125, 211, 252, 0.42) !important;
+            box-shadow: 0 10px 24px rgba(2, 6, 23, 0.24), 0 0 0 1px rgba(125, 211, 252, 0.08) inset !important;
+            transform: translateY(-1px);
+        }
+        div[data-testid="stRadio"] [role="radiogroup"] label:active {
+            transform: translateY(0);
+            background: rgba(59, 130, 246, 0.22) !important;
+            border-color: rgba(125, 211, 252, 0.56) !important;
+        }
+        div[data-testid="stRadio"] [role="radiogroup"] label[data-checked="true"],
+        div[data-testid="stRadio"] [role="radiogroup"] label[aria-checked="true"],
+        div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked) {
             background: linear-gradient(180deg, rgba(59, 130, 246, 0.88), rgba(96, 165, 250, 0.94)) !important;
             border-color: rgba(255, 255, 255, 0.74) !important;
             box-shadow: 0 0 0 2px rgba(255,255,255,0.08) inset;
             color: #ffffff !important;
         }
-        div[data-testid="stRadio"] [role="radiogroup"] label > div:first-child {
-            display: none !important;
+        div[data-testid="stRadio"] [role="radiogroup"] label[data-checked="true"]:hover,
+        div[data-testid="stRadio"] [role="radiogroup"] label[aria-checked="true"]:hover,
+        div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked):hover {
+            background: linear-gradient(180deg, rgba(76, 145, 252, 0.92), rgba(125, 179, 255, 0.98)) !important;
+            border-color: rgba(255, 255, 255, 0.84) !important;
+            box-shadow: 0 14px 28px rgba(30, 64, 175, 0.28), 0 0 0 2px rgba(255,255,255,0.12) inset !important;
         }
-        div[data-testid="stRadio"] [role="radiogroup"] label > div:last-child {
+        div[data-testid="stRadio"] [role="radiogroup"] label [data-baseweb="radio"],
+        div[data-testid="stRadio"] [role="radiogroup"] label input[type="radio"] {
+            display: none !important;
+            opacity: 0 !important;
+            width: 0 !important;
+            height: 0 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            pointer-events: none !important;
+        }
+        div[data-testid="stRadio"] [role="radiogroup"] label > div:first-child,
+        div[data-testid="stRadio"] [role="radiogroup"] label svg {
+            display: none !important;
+            opacity: 0 !important;
+            width: 0 !important;
+            height: 0 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            pointer-events: none !important;
+        }
+        div[data-testid="stRadio"] [role="radiogroup"] label [data-testid="stMarkdownContainer"] {
             display: flex !important;
+            flex-direction: column !important;
             align-items: center !important;
             justify-content: center !important;
             width: 100% !important;
             height: 100% !important;
         }
-        div[data-testid="stRadio"] [role="radiogroup"] label > div:last-child p,
-        div[data-testid="stRadio"] [role="radiogroup"] label > div:last-child span {
+        div[data-testid="stRadio"] [role="radiogroup"] label > div {
+            width: 100% !important;
+        }
+        div[data-testid="stRadio"] [role="radiogroup"] label p,
+        div[data-testid="stRadio"] [role="radiogroup"] label span {
             white-space: pre-line !important;
             line-height: 1.25 !important;
             text-align: center !important;
@@ -492,11 +513,18 @@ def _inject_active_etf_css():
         }
         .active-etf-change-row {
             display: grid;
-            grid-template-columns: 92px minmax(180px, 1.35fr) minmax(180px, 0.95fr);
+            grid-template-columns: 92px minmax(0, 1fr);
             gap: 1rem;
-            align-items: center;
+            align-items: start;
             padding: 1rem 1rem;
             border-top: 1px solid rgba(148, 163, 184, 0.16);
+        }
+        .active-etf-change-body {
+            display: block;
+            min-width: 0;
+        }
+        .active-etf-change-left {
+            min-width: 0;
         }
         .active-etf-change-weight {
             color: #f8fafc;
@@ -519,27 +547,23 @@ def _inject_active_etf_css():
             margin-top: 0.18rem;
         }
         .active-etf-change-right {
-            text-align: right;
+            margin-top: 0.45rem;
             min-width: 0;
+            text-align: left;
         }
         .active-etf-change-shares {
-            font-size: 0.98rem;
+            font-size: 0.86rem;
             font-weight: 900;
             line-height: 1.25;
-            word-break: break-word;
+            overflow-wrap: anywhere;
         }
-        .active-etf-change-weightdelta {
+        .active-etf-change-meta {
             margin-top: 0.2rem;
-            font-size: 0.88rem;
-            font-weight: 800;
-            line-height: 1.2;
-        }
-        .active-etf-change-amount {
-            margin-top: 0.18rem;
-            color: #94a3b8;
-            font-size: 0.82rem;
+            font-size: 0.78rem;
             font-weight: 700;
             line-height: 1.2;
+            color: #94a3b8;
+            overflow-wrap: anywhere;
         }
         .active-etf-timeline-empty {
             border: 1px dashed rgba(148, 163, 184, 0.26);
@@ -597,25 +621,6 @@ def _short_date_label(date_text):
 
 
 def _render_date_timeline(etf_code, history_summary_df, selected_snapshot_date, latest_snapshot_date):
-    st.markdown(
-        _html_fragment(
-            f"""
-            <div class="active-etf-timeline-wrap">
-                <div class="active-etf-timeline-head">
-                    <span>每日變動時間軸</span>
-                    <div class="active-etf-timeline-legend">
-                        <span><span class="active-etf-dot add"></span>新增</span>
-                        <span><span class="active-etf-dot inc"></span>加碼</span>
-                        <span><span class="active-etf-dot dec"></span>減碼</span>
-                        <span><span class="active-etf-dot rem"></span>移出</span>
-                    </div>
-                </div>
-            </div>
-            """
-        ),
-        unsafe_allow_html=True,
-    )
-
     timeline_rows = history_summary_df.sort_values("snapshot_date").to_dict("records")
     option_map = {}
     for row in timeline_rows:
@@ -636,16 +641,45 @@ def _render_date_timeline(etf_code, history_summary_df, selected_snapshot_date, 
             f"{int(row.get('change_count') or 0)}"
         )
 
+    st.markdown(
+        _html_fragment(
+            f"""
+            <div class="active-etf-timeline-wrap">
+                <div class="active-etf-timeline-head">
+                    <span>每日變動時間軸</span>
+                    <div class="active-etf-timeline-legend">
+                        <span><span class="active-etf-dot add"></span>新增</span>
+                        <span><span class="active-etf-dot inc"></span>加碼</span>
+                        <span><span class="active-etf-dot dec"></span>減碼</span>
+                        <span><span class="active-etf-dot rem"></span>移出</span>
+                    </div>
+                </div>
+            </div>
+            """
+        ),
+        unsafe_allow_html=True,
+    )
     date_options = list(option_map.keys())
+    if not date_options:
+        return str(selected_snapshot_date or latest_snapshot_date or "")
+
+    radio_key = f"active_etf_timeline_radio_{etf_code}"
+    normalized_selected = str(selected_snapshot_date) if selected_snapshot_date is not None else ""
+    if normalized_selected not in date_options:
+        normalized_selected = date_options[-1]
+    if radio_key not in st.session_state or str(st.session_state.get(radio_key)) not in date_options:
+        st.session_state[radio_key] = normalized_selected
+
     picked_date = st.radio(
-        "每日變動時間軸",
+        "每日變動時間軸卡片",
         options=date_options,
-        index=date_options.index(str(selected_snapshot_date)) if str(selected_snapshot_date) in date_options else 0,
+        index=date_options.index(normalized_selected),
         format_func=lambda value: option_map.get(value, str(value)),
         horizontal=True,
-        key=f"active_etf_timeline_radio_{etf_code}",
+        key=radio_key,
         label_visibility="collapsed",
     )
+
     return str(picked_date)
 
 
@@ -702,6 +736,15 @@ def _normalize_changes_df(raw_changes_df):
         working_df["new_shares"] = pd.to_numeric(working_df["newShares"], errors="coerce")
     if "new_lots" not in working_df.columns and "new_shares" in working_df.columns:
         working_df["new_lots"] = working_df["new_shares"] / 1000
+    if "holding_amount_ntd" not in working_df.columns and "holding_amount_100m" in working_df.columns:
+        working_df["holding_amount_ntd"] = pd.to_numeric(working_df["holding_amount_100m"], errors="coerce") * 100000000
+    if "holding_amount_ntd" in working_df.columns:
+        working_df["holding_amount_ntd"] = pd.to_numeric(working_df["holding_amount_ntd"], errors="coerce")
+    if "close" in working_df.columns:
+        working_df["close"] = pd.to_numeric(working_df["close"], errors="coerce")
+    if "holding_amount_ntd" in working_df.columns and "close" in working_df.columns and "new_shares" in working_df.columns:
+        close_based_mask = working_df["close"].notna() & working_df["new_shares"].notna()
+        working_df.loc[close_based_mask, "holding_amount_ntd"] = working_df.loc[close_based_mask, "close"] * working_df.loc[close_based_mask, "new_shares"]
     if "holding_amount_100m" not in working_df.columns and "holding_amount_ntd" in working_df.columns:
         working_df["holding_amount_100m"] = pd.to_numeric(working_df["holding_amount_ntd"], errors="coerce") / 100000000
 
@@ -711,7 +754,7 @@ def _normalize_changes_df(raw_changes_df):
 def _build_sorted_changes_table(raw_changes_df, sort_by):
     working_df = _normalize_changes_df(raw_changes_df)
     if working_df.empty:
-        return pd.DataFrame(columns=["動作", "代碼", "名稱", "產業", "股數變化", "張數變化", "權重變化(%)", "前日權重(%)", "最新權重(%)", "持有金額(估,億)", "最新股數", "最新張數"])
+        return pd.DataFrame(columns=["動作", "代碼", "名稱", "產業", "股數變化", "張數變化", "權重變化(%)", "前日權重(%)", "最新權重(%)", "持有金額(估,萬)", "最新股數", "最新張數"])
 
     if sort_by == "持有金額":
         working_df = working_df.sort_values(["holding_amount_100m", "shares_delta"], ascending=[False, False], na_position="last")
@@ -730,7 +773,7 @@ def _build_sorted_changes_table(raw_changes_df, sort_by):
             "權重變化(%)": working_df["weight_delta"].map(lambda value: "-" if pd.isna(value) else f"{value:+.2f}"),
             "前日權重(%)": working_df["old_weight"].map(lambda value: "-" if pd.isna(value) else f"{value:.2f}"),
             "最新權重(%)": working_df["new_weight"].map(lambda value: "-" if pd.isna(value) else f"{value:.2f}"),
-            "持有金額(估,億)": working_df["holding_amount_100m"].map(lambda value: "-" if pd.isna(value) else f"{value:,.2f}"),
+            "持有金額(估,萬)": working_df["holding_amount_ntd"].map(lambda value: "-" if pd.isna(value) else f"{value / 10000:,.1f}"),
             "最新股數": working_df["new_shares"].map(lambda value: "-" if pd.isna(value) else f"{int(round(value)):,}"),
             "最新張數": working_df["new_lots"].map(lambda value: "-" if pd.isna(value) else f"{value:,.1f}"),
         }
@@ -821,13 +864,9 @@ def _render_etf_overview_list(raw_df):
     for _, row in raw_df.iterrows():
         row_cols = st.columns([3.2, 0.9, 0.8, 0.8, 0.8, 0.5])
         with row_cols[0]:
-            st.markdown(
-                f"""
-                <div class="active-etf-list-name">{row['name']} <span class="active-etf-list-code">{row['code']}</span></div>
-                <div class="active-etf-list-date">{row.get('latest_snapshot_date') or '-'}</div>
-                """,
-                unsafe_allow_html=True,
-            )
+            if st.button(f"{row['name']}  {row['code']}", key=f"open_active_etf_name_{row['code']}", type="tertiary"):
+                navigate_to_active_etf(row["code"])
+            st.markdown(f"<div class='active-etf-list-date'>{row.get('latest_snapshot_date') or '-'}</div>", unsafe_allow_html=True)
         with row_cols[1]:
             st.markdown(f"<div class='active-etf-list-value'>{int(row.get('change_count') or 0)}</div>", unsafe_allow_html=True)
         for col, value in zip(row_cols[2:5], [row.get("today_pct"), row.get("week_pct"), row.get("month_pct")]):
@@ -864,7 +903,6 @@ def _render_overview_tab(detail_bundle):
         [
             ("追蹤指數", overview.get("tracking_index") or "無（經理人主動管理）"),
             ("管理費用", "-" if overview.get("management_fee") is None else f"{overview['management_fee']:.2f}%"),
-            ("配息頻率", overview.get("dividend_frequency") or "-"),
             ("發行公司", overview.get("issuer") or "-"),
             ("基金規模", _format_100m(overview.get("aum_100m"), digits=2)),
             ("成立日期", overview.get("launch_date") or "-"),
@@ -874,11 +912,7 @@ def _render_overview_tab(detail_bundle):
     _render_stat_cards(
         [
             ("最新市價", "-" if overview.get("price") is None else f"{overview['price']:.2f}"),
-            ("最新 NAV", "-" if overview.get("nav") is None else f"{overview['nav']:.2f}"),
             ("折溢價", _format_pct(overview.get("premium"))),
-            ("近 1 年", _format_pct(overview.get("return_1y"))),
-            ("近 3 年", _format_pct(overview.get("return_3y"))),
-            ("近 5 年", _format_pct(overview.get("return_5y"))),
         ]
     )
     st.markdown("")
@@ -986,8 +1020,8 @@ def _render_change_panel(title, tone, raw_changes_df, sort_by, actions):
         lots_text = "-" if pd.isna(lots_delta) else f"{lots_delta:+,.1f} 張"
         weight_delta = row.get("weight_delta")
         weight_text = "-" if pd.isna(weight_delta) else f"{weight_delta:+.2f}%"
-        holding_amount = row.get("holding_amount_100m")
-        amount_text = "-" if pd.isna(holding_amount) else f"持有金額 {holding_amount:,.2f} 億"
+        holding_amount_ntd = row.get("holding_amount_ntd")
+        amount_text = "-" if pd.isna(holding_amount_ntd) else _format_10k(holding_amount_ntd / 10000, digits=1)
         shares_style = "color:#f43f5e;" if shares_text.startswith("+") else "color:#22c55e;" if shares_text.startswith("-") else "color:#cbd5e1;"
         weight_style = "color:#f43f5e;" if weight_text.startswith("+") else "color:#22c55e;" if weight_text.startswith("-") else "color:#cbd5e1;"
         rows.append(
@@ -995,14 +1029,15 @@ def _render_change_panel(title, tone, raw_changes_df, sort_by, actions):
                 f"""
                 <div class="active-etf-change-row">
                     <div class="active-etf-change-weight">{latest_weight}</div>
-                    <div>
-                        <div class="active-etf-change-name">{row.get('name') or '-'}<span class="active-etf-change-code">{row.get('code') or '-'}</span></div>
-                        <div class="active-etf-change-industry">{row.get('industry') or '-'}</div>
-                    </div>
-                    <div class="active-etf-change-right">
-                        <div class="active-etf-change-shares" style="{shares_style}">{shares_text} ／ {lots_text}</div>
-                        <div class="active-etf-change-weightdelta" style="{weight_style}">{weight_text}</div>
-                        <div class="active-etf-change-amount">{amount_text}</div>
+                    <div class="active-etf-change-body">
+                        <div class="active-etf-change-left">
+                            <div class="active-etf-change-name">{row.get('name') or '-'}<span class="active-etf-change-code">{row.get('code') or '-'}</span></div>
+                            <div class="active-etf-change-industry">{row.get('industry') or '-'}</div>
+                        </div>
+                        <div class="active-etf-change-right">
+                            <div class="active-etf-change-shares" style="{shares_style}">{shares_text} ／ {lots_text}</div>
+                            <div class="active-etf-change-meta"><span style="{weight_style}">{weight_text}</span> ｜ 持有金額 {amount_text}</div>
+                        </div>
                     </div>
                 </div>
                 """
@@ -1059,11 +1094,11 @@ def _render_changes_tab(detail_bundle):
         latest_snapshot_date,
     )
     if str(picked_snapshot_date) != str(selected_snapshot_date):
-        navigate_to_active_etf(detail_bundle["code"], str(picked_snapshot_date))
-        return
+        st.session_state[f"active_etf_selected_snapshot_{detail_bundle['code']}"] = str(picked_snapshot_date)
+        st.rerun()
 
     _render_selected_period_strip(
-        history_summary_df[history_summary_df["snapshot_date"].astype(str) == str(selected_snapshot_date)].iloc[0]
+        history_summary_df[history_summary_df["snapshot_date"].astype(str) == str(picked_snapshot_date)].iloc[0]
     )
 
     if len(date_options) == 1:
@@ -1072,9 +1107,9 @@ def _render_changes_tab(detail_bundle):
             unsafe_allow_html=True,
         )
 
-    selected_summary_row = history_summary_df[history_summary_df["snapshot_date"].astype(str) == str(selected_snapshot_date)].iloc[0]
-    selected_changes_raw_df = load_etf_change_snapshot_items(detail_bundle["code"], str(selected_snapshot_date))
-    if selected_changes_raw_df.empty and str(selected_snapshot_date) == str(latest_snapshot_date):
+    selected_summary_row = history_summary_df[history_summary_df["snapshot_date"].astype(str) == str(picked_snapshot_date)].iloc[0]
+    selected_changes_raw_df = load_etf_change_snapshot_items(detail_bundle["code"], str(picked_snapshot_date))
+    if selected_changes_raw_df.empty and str(picked_snapshot_date) == str(latest_snapshot_date):
         selected_changes_raw_df = detail_bundle["raw_changes_df"].copy()
 
     selected_changes_df = _build_sorted_changes_table(selected_changes_raw_df, "增減量")
@@ -1092,7 +1127,7 @@ def _render_changes_tab(detail_bundle):
         "持股變動排序",
         ["增減量", "持有金額"],
         default="增減量",
-        key=f"active_etf_change_sort_{detail_bundle['code']}_{selected_snapshot_date}",
+        key=f"active_etf_change_sort_{detail_bundle['code']}_{picked_snapshot_date}",
     )
     selected_changes_df = _build_sorted_changes_table(selected_changes_raw_df, sort_by)
     if selected_changes_df.empty:
@@ -1115,34 +1150,43 @@ def render_active_etf_page(state):
 
     query_code = st.query_params.get("active_etf_code")
     query_date = st.query_params.get("active_etf_date")
+    previous_query_code = st.session_state.get("_active_etf_query_code")
     if query_code:
         normalized_query_code = str(query_code)
         st.session_state["active_etf_selected_code"] = normalized_query_code
         st.session_state["active_etf_view_mode"] = "detail"
         if query_date:
             st.session_state[f"active_etf_selected_snapshot_{normalized_query_code}"] = str(query_date)
-        else:
+        elif previous_query_code != normalized_query_code:
             st.session_state.pop(f"active_etf_selected_snapshot_{normalized_query_code}", None)
+        st.session_state["_active_etf_query_code"] = normalized_query_code
     elif "active_etf_view_mode" not in st.session_state:
         st.session_state["active_etf_view_mode"] = "list"
 
     st.subheader("主動 ETF 動向")
-    st.caption("我先把這頁整理成比較像產品頁的流向：先看 ETF 清單，點進去後拆單一 ETF 的概覽、成分股、持股變動。")
 
-    control_cols = st.columns([0.9, 1.0, 1.0, 1.15, 1.8])
-    top_n = control_cols[0].selectbox("顯示筆數", [8, 12, 20, 25], index=2, key="active_etf_top_n")
-    sort_by = control_cols[1].selectbox("排序依據", ["資金大小", "ETF編號"], index=0, key="active_etf_sort_by")
-    sort_order = control_cols[2].selectbox("排序方向", ["降冪", "升冪"], index=0, key="active_etf_sort_order")
-    rerun_active_etf = control_cols[3].button("重新整理資料", use_container_width=True, key="rerun_active_etf")
-    control_cols[4].caption("目前資料先以 ETF 資訊網和 TWSE 整理出的台股主動式 ETF 為主。")
-
-    history_refresh_cols = st.columns([1.0, 2.2])
-    refresh_all_history = history_refresh_cols[0].button(
-        "整理全部快照",
-        use_container_width=True,
-        key="active_etf_refresh_all_histories",
-    )
-    history_refresh_cols[1].caption("這個按鈕會把目前所有主動式 ETF 的當日快照都存進本地歷史庫，之後每日再整理一次，時間軸就會自然累積更多日期。")
+    top_n = 999
+    control_cols = st.columns([0.9, 0.9, 4.2])
+    with control_cols[0]:
+        st.caption("排序依據")
+        sort_by = st.selectbox(
+            "排序依據",
+            ["資金大小", "ETF編號"],
+            index=0,
+            key="active_etf_sort_by",
+            label_visibility="collapsed",
+        )
+    with control_cols[1]:
+        st.caption("升降冪")
+        sort_order = st.selectbox(
+            "升降冪",
+            ["降冪", "升冪"],
+            index=0,
+            key="active_etf_sort_order",
+            label_visibility="collapsed",
+        )
+    rerun_active_etf = False
+    refresh_all_history = False
 
     history_job_id, history_job = ensure_background_data_job(
         "active_etf_history_job_id",
@@ -1154,8 +1198,6 @@ def render_active_etf_page(state):
         failed_message="整理全部主動 ETF 快照失敗",
         force_start=refresh_all_history,
     )
-    if history_job and history_job["status"] in {"queued", "running"}:
-        render_background_data_job_status("active_etf_history_job_id", "主動 ETF 歷史快照背景任務")
 
     overview_cache_key = ("v3", datetime.now().strftime("%Y-%m-%d"), int(top_n))
     overview_job_id, overview_job = ensure_background_data_job(
@@ -1185,34 +1227,21 @@ def render_active_etf_page(state):
         return
 
     raw_df = _sort_active_etf_overview(overview_bundle["raw_df"].copy(), sort_by, sort_order)
-    summary_cols = st.columns(4)
-    with summary_cols[0]:
-        st.metric("資料更新", overview_bundle.get("updated_at") or "-")
-    with summary_cols[1]:
-        st.metric("追蹤 ETF", len(raw_df))
-    with summary_cols[2]:
-        st.metric("規模最大", overview_bundle.get("largest_etf") or "-")
-    with summary_cols[3]:
-        st.metric("異動最積極", overview_bundle.get("busiest_etf") or "-")
-
     selector_label_map = {f"{row['code']}｜{row['name']}": row["code"] for _, row in raw_df.iterrows()}
-    selector_cols = st.columns([1.4, 1.0, 2.0])
-    selected_label = selector_cols[0].selectbox(
-        "快速選 ETF",
-        options=list(selector_label_map.keys()),
-        index=0,
-        key="active_etf_quick_selector",
-    )
-    if selector_cols[1].button("打開 ETF 詳情", key="active_etf_open_from_selector", use_container_width=True):
-        navigate_to_active_etf(selector_label_map[selected_label])
-    selector_cols[2].caption("你也可以直接從下面清單點 `查看`，進單一 ETF detail 頁。")
+    view_mode = st.session_state.get("active_etf_view_mode")
+    selected_code = st.session_state.get("active_etf_selected_code")
 
-    _render_etf_overview_list(raw_df.head(top_n))
-
-    if st.session_state.get("active_etf_view_mode") != "detail":
+    if view_mode != "detail":
+        _render_etf_overview_list(raw_df)
         return
 
-    selected_code = st.session_state.get("active_etf_selected_code") or selector_label_map[selected_label]
+    if not selected_code:
+        fallback_code = raw_df.iloc[0]["code"] if not raw_df.empty else None
+        if fallback_code:
+            navigate_to_active_etf(fallback_code)
+        else:
+            st.caption("目前沒有可用的 ETF 詳情資料。")
+        return
 
     detail_cache_key = ("v5", datetime.now().strftime("%Y-%m-%d"), selected_code)
     detail_job_id, detail_job = ensure_background_data_job(

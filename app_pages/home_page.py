@@ -68,17 +68,11 @@ def _render_homepage_background_status(job_specs):
 
 def render_home_page(state):
     st.subheader("每日首頁")
-    st.caption("這裡會先整理每天值得優先看的訊號：法人連買賣、資金流向、法說日程、月營收動能與處置股票。")
     st.markdown(HOMEPAGE_BRIEF_STYLE, unsafe_allow_html=True)
     cache_date = datetime.now().strftime("%Y-%m-%d")
     background_manager = get_background_data_job_manager()
     trade_date_resolution = resolve_recent_trade_date(state["home_trade_date"])
     effective_trade_date = trade_date_resolution["effective_date"]
-    if trade_date_resolution["used_fallback"]:
-        st.caption(
-            f"首頁資料日期 {trade_date_resolution['requested_date']} 非交易日或尚無完整行情，"
-            f"已自動改用最近可讀交易日：{trade_date_resolution['effective_date_text']}"
-        )
 
     institutional_job_id, institutional_job = ensure_background_data_job(
         "homepage_institutional_job_id",
@@ -195,17 +189,6 @@ def render_home_page(state):
         failed_job = background_manager.get_job(institutional_job_id, include_result=False)
         st.error(f"讀取首頁法人訊號失敗：{failed_job.get('error') or '未知錯誤'}")
 
-    reference_dates = None
-    for streak_days in sorted(INSTITUTIONAL_STREAK_OPTIONS, reverse=True):
-        streak_group = institutional_results.get(streak_days, {})
-        if streak_group.get("foreign"):
-            reference_dates = streak_group["foreign"]["trade_dates"]
-            break
-        if streak_group.get("total"):
-            reference_dates = streak_group["total"]["trade_dates"]
-            break
-    if reference_dates:
-        st.caption(f"連續觀察交易日：{' / '.join(reference_dates)}")
     revenue_result = None
     if revenue_job and revenue_job["status"] == "completed":
         revenue_result = background_manager.get_job(revenue_job_id, include_result=True).get("result")
@@ -261,42 +244,6 @@ def render_home_page(state):
         active_etf_home_job,
         schedule_job,
     ]
-    _render_homepage_background_status(
-        [
-            ("homepage_institutional_job_id", "法人訊號"),
-            ("homepage_revenue_job_id", "月營收動能"),
-            ("homepage_market_watch_job_id", "漲跌停與鎖住名單"),
-            ("homepage_disposition_job_id", "處置股票"),
-            ("homepage_industry_job_id", "產業輪動摘要"),
-            ("homepage_industry_flow_job_id", "資金流向"),
-            ("homepage_active_etf_job_id", "主動 ETF 摘要"),
-            ("homepage_schedule_job_id", "法說 / 發表會日程"),
-        ]
-    )
-    completed_home_jobs = sum(1 for job in home_data_jobs if job and job["status"] in {"completed", "failed"})
-    total_home_jobs = len(home_data_jobs)
-
-    if completed_home_jobs < total_home_jobs:
-        pending_labels = []
-        if institutional_job and institutional_job["status"] in {"queued", "running"}:
-            pending_labels.append("法人訊號")
-        if revenue_job and revenue_job["status"] in {"queued", "running"}:
-            pending_labels.append("月營收動能")
-        if market_watch_job and market_watch_job["status"] in {"queued", "running"}:
-            pending_labels.append("漲跌停與鎖住名單")
-        if disposition_job and disposition_job["status"] in {"queued", "running"}:
-            pending_labels.append("處置股票")
-        if industry_home_job and industry_home_job["status"] in {"queued", "running"}:
-            pending_labels.append("產業輪動摘要")
-        if industry_flow_job and industry_flow_job["status"] in {"queued", "running"}:
-            pending_labels.append("資金流向")
-        if active_etf_home_job and active_etf_home_job["status"] in {"queued", "running"}:
-            pending_labels.append("主動 ETF 摘要")
-        if schedule_job and schedule_job["status"] in {"queued", "running"}:
-            pending_labels.append("法說 / 發表會日程")
-        if pending_labels:
-            st.caption(f"背景整理中：{'、'.join(pending_labels)}。畫面已先顯示目前抓得到的資料；如果想看最新完整結果，再手動重新整理一次即可。")
-
     render_market_brief(
         {},
         revenue_result,

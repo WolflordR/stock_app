@@ -398,7 +398,8 @@ def _goalstar_items_to_changes_df(current_items, previous_items):
         if price is None:
             price = _to_float(previous_row.get("close"))
         value_shares = new_shares if new_shares > 0 else old_shares
-        holding_amount_100m = (value_shares * price / 100000000) if price is not None else None
+        holding_amount_ntd = (value_shares * price) if price is not None else None
+        holding_amount_100m = (holding_amount_ntd / 100000000) if holding_amount_ntd is not None else None
 
         rows.append(
             {
@@ -414,6 +415,8 @@ def _goalstar_items_to_changes_df(current_items, previous_items):
                 "new_shares": new_shares,
                 "old_shares": old_shares,
                 "new_lots": new_shares / 1000 if new_shares is not None else None,
+                "close": price,
+                "holding_amount_ntd": holding_amount_ntd,
                 "holding_amount_100m": holding_amount_100m,
             }
         )
@@ -658,8 +661,14 @@ def build_active_etf_detail_bundle(code):
         changes_df["new_shares"] = changes_df["newShares"].map(_to_float)
         changes_df["old_shares"] = changes_df["oldShares"].map(_to_float)
         changes_df["new_lots"] = changes_df["new_shares"] / 1000
-        changes_df["holding_amount_ntd"] = changes_df["new_weight"].map(
-            lambda value: latest_aum_ntd * value / 100 if latest_aum_ntd is not None and value is not None and not pd.isna(value) else None
+        changes_df["close"] = changes_df["close"].map(_to_float) if "close" in changes_df.columns else None
+        changes_df["holding_amount_ntd"] = changes_df.apply(
+            lambda row: (
+                row["new_shares"] * row["close"]
+                if row.get("close") is not None and not pd.isna(row.get("close")) and row.get("new_shares") is not None and not pd.isna(row.get("new_shares"))
+                else (latest_aum_ntd * row["new_weight"] / 100 if latest_aum_ntd is not None and row.get("new_weight") is not None and not pd.isna(row.get("new_weight")) else None)
+            ),
+            axis=1,
         )
         changes_df["holding_amount_100m"] = changes_df["holding_amount_ntd"] / 100000000
         changes_df["最新權重(%)"] = changes_df["new_weight"].map(lambda value: "-" if value is None or pd.isna(value) else f"{value:.2f}")
