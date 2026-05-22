@@ -1,15 +1,15 @@
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urljoin
-
-from bs4 import BeautifulSoup
 
 from modules.core.http_utils import request_text
+from modules.data_sources.stock_db import find_security, get_stock_name
 
 
-HISTOCK_BASE_URL = "https://histock.tw"
+YAHOO_STOCK_BASE_URL = "https://tw.stock.yahoo.com"
 
 
 def _normalize_stock_code(stock_input: str) -> str:
@@ -21,9 +21,9 @@ def _clean_text(value: str) -> str:
     return (value or "").replace("\xa0", " ").strip()
 
 
-def _parse_float(value: str) -> float | None:
-    text = _clean_text(value).replace(",", "").replace("%", "")
-    if not text or text == "-":
+def _safe_float(value: Any) -> float | None:
+    text = str(value or "").strip().replace(",", "").replace("%", "")
+    if text in {"", "-", "--", "---", "－", "None"}:
         return None
     try:
         return float(text)
@@ -31,11 +31,84 @@ def _parse_float(value: str) -> float | None:
         return None
 
 
-def _parse_int(value: str) -> int | None:
-    number = _parse_float(value)
-    if number is None:
-        return None
-    return int(round(number))
+def _format_lots(value: float | None) -> str:
+    if value is None:
+        return "-"
+    return f"{value:,.0f}"
+
+
+def _format_price(value: float | None) -> str:
+    if value is None:
+        return "-"
+    return f"{value:.2f}"
+
+
+def _clean_stock_title(value: str) -> str:
+    text = _clean_text(value)
+    for token in ["籌碼相關", "券商分點績效", "獲利分析", "－", "-", "—"]:
+        if token in text:
+            text = text.split(token)[0].strip()
+    return text
+
+
+def _candidate_yahoo_symbols(stock_code: str) -> list[str]:
+    security = find_security(stock_code)
+    symbols: list[str] = []
+    if security and security.get("yfinance_symbol"):
+        symbols.append(str(security["yfinance_symbol"]).upper())
+
+    for suffix in (".TW", ".TWO"):
+        candidate = f"{stock_code}{suffix}"
+        if candidate not in symbols:
+            symbols.append(candidate)
+    return symbols
+
+
+def _extract_root_app_json(html: str) -> dict[str, Any]:
+    matched = re.search(
+        r"root\.App\.main\s*=\s*(\{.*?\})\s*;\s*}\(this\)\);",
+        html,
+        re.S,
+    )
+    if not matched:
+        raise ValueError("Yahoo 頁面結構已變動，暫時抓不到籌碼資料。")
+
+    raw = matched.group(1)
+    clean = re.sub(r"\bundefined\b", "null", raw)
+    clean = re.sub(r"\bNaN\b", "null", clean)
+    clean = re.sub(r"\b-Infinity\b", "null", clean)
+    clean = re.sub(r"\bInfinity\b", "null", clean)
+    return json.loads(clean)
+
+
+def _load_yahoo_broker_payload(stock_code: str) -> dict[str, Any]:
+    last_error: Exception | None = None
+    for yahoo_symbol in _candidate_yahoo_symbols(stock_code):
+        url = f"{YAHOO_STOCK_BASE_URL}/quote/{yahoo_symbol}/broker-trading"
+        try:
+            html = request_text(
+                url,
+                headers={
+                    "Referer": f"{YAHOO_STOCK_BASE_URL}/quote/{yahoo_symbol}",
+                    "User-Agent": "Mozilla/5.0",
+                },
+                timeout=20,
+            )
+            root = _extract_root_app_json(html)
+            stores = root["context"]["dispatcher"]["stores"]
+            broker_trades = ((stores.get("QuoteChipStore") or {}).get("brokerTrades") or {}).get("data") or {}
+            if broker_trades.get("buyerRankList") or broker_trades.get("sellerRankList"):
+                return {
+                    "yahoo_symbol": yahoo_symbol,
+                    "source_url": url,
+                    "data": broker_trades,
+                }
+            last_error = ValueError("Yahoo 籌碼頁目前沒有回傳買賣分點榜。")
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            continue
+
+    raise ValueError(f"目前抓不到 Yahoo 主力進出資料：{last_error}") from last_error
 
 
 @dataclass
@@ -71,111 +144,53 @@ class BrokerBranchRow:
         }
 
 
+def _build_row(entry: dict[str, Any]) -> BrokerBranchRow:
+    buy_lots = _safe_float(entry.get("buyVolK"))
+    sell_lots = _safe_float(entry.get("sellVolK"))
+    net_lots = _safe_float(entry.get("volume"))
+
+    return BrokerBranchRow(
+        broker_branch=_clean_text(entry.get("name") or "-"),
+        performance_pct="-",
+        total_profit_k="-",
+        realized_profit_k="-",
+        unrealized_profit_k="-",
+        net_shares=_format_lots(net_lots),
+        buy_shares=_format_lots(buy_lots),
+        sell_shares=_format_lots(sell_lots),
+        avg_price="-",
+        avg_buy="-",
+        avg_sell="-",
+        close_price="-",
+        detail_url="",
+    )
+
+
 def fetch_broker_branch_summary(stock_input: str, *, top_n: int = 12) -> dict[str, Any]:
     stock_code = _normalize_stock_code(stock_input)
     if not stock_code:
         raise ValueError("無法辨識股票代碼。")
 
-    url = f"{HISTOCK_BASE_URL}/stock/mainprofit.aspx?no={stock_code}"
-    html = request_text(url, headers={"Referer": f"{HISTOCK_BASE_URL}/stock/{stock_code}"})
-    soup = BeautifulSoup(html, "html.parser")
-    tables = soup.find_all("table")
-    if len(tables) < 2:
-        raise ValueError("目前抓不到券商分點總表。")
+    payload = _load_yahoo_broker_payload(stock_code)
+    broker_data = payload["data"]
+    buy_entries = list(broker_data.get("buyerRankList") or [])[:top_n]
+    sell_entries = list(broker_data.get("sellerRankList") or [])[:top_n]
 
-    def parse_table(table) -> list[BrokerBranchRow]:
-        rows: list[BrokerBranchRow] = []
-        for tr in table.find_all("tr")[1:]:
-            cells = tr.find_all("td")
-            if len(cells) < 13:
-                continue
-            link = tr.find("a", href=True)
-            if not link:
-                continue
-            values = [_clean_text(td.get_text(" ", strip=True)) for td in cells]
-            rows.append(
-                BrokerBranchRow(
-                    broker_branch=values[1],
-                    performance_pct=values[2],
-                    total_profit_k=values[3],
-                    realized_profit_k=values[4],
-                    unrealized_profit_k=values[5],
-                    net_shares=values[6],
-                    buy_shares=values[7],
-                    sell_shares=values[8],
-                    avg_price=values[9],
-                    avg_buy=values[10],
-                    avg_sell=values[11],
-                    close_price=values[12],
-                    detail_url=urljoin(HISTOCK_BASE_URL, link["href"]),
-                )
-            )
-        return rows[:top_n]
-
-    positive_rows = parse_table(tables[0])
-    negative_rows = parse_table(tables[1])
-    stock_name_node = soup.find("div", class_="ctname")
-    stock_title = _clean_text(stock_name_node.get_text(" ", strip=True)) if stock_name_node else stock_code
+    security = find_security(stock_code)
+    stock_name = security.get("name_zh") if security else get_stock_name(stock_code)
+    yahoo_symbol = payload["yahoo_symbol"]
+    stock_title = _clean_stock_title(f"{stock_name} ({yahoo_symbol.split('.')[0]})")
 
     return {
         "stock_code": stock_code,
         "stock_title": stock_title,
-        "source_url": url,
-        "buy_side": positive_rows,
-        "sell_side": negative_rows,
+        "trade_date": str(broker_data.get("date") or "").split("T")[0],
+        "trade_volume_rate": _safe_float(broker_data.get("tradeVolumeRate")),
+        "source_url": payload["source_url"],
+        "buy_side": [_build_row(entry) for entry in buy_entries],
+        "sell_side": [_build_row(entry) for entry in sell_entries],
     }
 
 
 def fetch_broker_branch_trace(detail_url: str, *, limit_rows: int = 30) -> dict[str, Any]:
-    if not detail_url:
-        raise ValueError("缺少分點明細網址。")
-
-    html = request_text(detail_url, headers={"Referer": HISTOCK_BASE_URL})
-    soup = BeautifulSoup(html, "html.parser")
-    table = soup.find("table")
-    if table is None:
-        raise ValueError("目前抓不到分點明細表。")
-
-    title_node = soup.find("div", class_="ctname")
-    title_text = _clean_text(title_node.get_text(" ", strip=True)) if title_node else "券商分點個股進出"
-    rows: list[dict[str, Any]] = []
-    for tr in table.find_all("tr")[1:]:
-        cells = tr.find_all("td")
-        if len(cells) < 10:
-            continue
-        values = [_clean_text(td.get_text(" ", strip=True)) for td in cells]
-        rows.append(
-            {
-                "日期": values[0],
-                "買進張數": values[1],
-                "買進均價": values[2],
-                "賣出張數": values[3],
-                "賣出均價": values[4],
-                "收盤價": values[5],
-                "買賣超": values[6],
-                "60日均量": values[7],
-                "成交佔比": values[8],
-                "大量交易提示": values[9],
-                "_net_shares_value": _parse_float(values[6]),
-                "_buy_shares_value": _parse_float(values[1]),
-                "_sell_shares_value": _parse_float(values[3]),
-            }
-        )
-
-    recent_rows = rows[:limit_rows]
-    recent_5_net = sum(row.get("_net_shares_value") or 0 for row in recent_rows[:5])
-    recent_20_net = sum(row.get("_net_shares_value") or 0 for row in recent_rows[:20])
-    latest_net = recent_rows[0].get("_net_shares_value") if recent_rows else None
-
-    cleaned_rows = []
-    for row in recent_rows:
-        cleaned_rows.append({key: value for key, value in row.items() if not key.startswith("_")})
-
-    return {
-        "title": title_text,
-        "source_url": detail_url,
-        "rows": cleaned_rows,
-        "latest_net_shares": latest_net,
-        "recent_5_net_shares": recent_5_net,
-        "recent_20_net_shares": recent_20_net,
-    }
+    raise ValueError("Yahoo 來源目前只提供當日買賣分點榜，沒有單一分點歷史明細。")

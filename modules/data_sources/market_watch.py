@@ -267,6 +267,62 @@ def fetch_tpex_daily_quotes(trade_date):
     return _build_quote_metrics(normalized_df).dropna(subset=["close"])
 
 
+def fetch_twse_odd_lot_quotes():
+    rows = _request_json("https://openapi.twse.com.tw/v1/exchangeReport/TWT53U")
+    source_df = pd.DataFrame(rows)
+    if source_df.empty:
+        return pd.DataFrame(columns=["code", "date", "odd_volume"])
+    return pd.DataFrame(
+        {
+            "code": source_df["Code"].astype(str).str.strip(),
+            "date": source_df["Date"].map(_roc_compact_to_iso) if "Date" in source_df.columns else "",
+            "odd_volume": source_df["TradeVolume"].map(_clean_number),
+        }
+    )
+
+
+def fetch_twse_after_market_quotes():
+    rows = _request_json("https://openapi.twse.com.tw/v1/exchangeReport/BFT41U")
+    source_df = pd.DataFrame(rows)
+    if source_df.empty:
+        return pd.DataFrame(columns=["code", "date", "after_market_volume"])
+    return pd.DataFrame(
+        {
+            "code": source_df["Code"].astype(str).str.strip(),
+            "date": source_df["Date"].map(_roc_compact_to_iso) if "Date" in source_df.columns else "",
+            "after_market_volume": source_df["TradeVolume"].map(_clean_number),
+        }
+    )
+
+
+def fetch_tpex_odd_lot_quotes():
+    rows = _request_json("https://www.tpex.org.tw/openapi/v1/tpex_odd_stock")
+    source_df = pd.DataFrame(rows)
+    if source_df.empty:
+        return pd.DataFrame(columns=["code", "date", "odd_volume"])
+    return pd.DataFrame(
+        {
+            "code": source_df["SecuritiesCompanyCode"].astype(str).str.strip(),
+            "date": source_df["Date"].map(_roc_compact_to_iso),
+            "odd_volume": source_df["TradeVolume"].map(_clean_number),
+        }
+    )
+
+
+def fetch_tpex_after_market_quotes():
+    rows = _request_json("https://www.tpex.org.tw/openapi/v1/tpex_off_market")
+    source_df = pd.DataFrame(rows)
+    if source_df.empty:
+        return pd.DataFrame(columns=["code", "date", "after_market_volume"])
+    return pd.DataFrame(
+        {
+            "code": source_df["SecuritiesCompanyCode"].astype(str).str.strip(),
+            "date": source_df["Date"].map(_roc_compact_to_iso),
+            "after_market_volume": source_df["TradeVolume"].map(_clean_number),
+        }
+    )
+
+
 def _find_recent_quotes(anchor_date, max_lookback_days=7):
     current_date = _to_date(anchor_date)
     for offset in range(max_lookback_days + 1):
