@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from textwrap import dedent
 import pandas as pd
 import streamlit as st
 
+from modules.etf.active_etf_history_store import load_etf_history_date_bounds
 from modules.etf.active_etf_history_store import load_etf_change_snapshot_items
-from modules.etf.active_etf_watch import refresh_all_active_etf_history_snapshots
+from modules.etf.active_etf_history_store import search_etf_stock_changes
 from modules.core.internal_nav import navigate_to_active_etf
 from modules.ui.ui_data import load_active_etf_detail_data
 from modules.ui.ui_data import load_active_etf_overview_data
@@ -892,6 +893,102 @@ def _sort_active_etf_overview(raw_df, sort_by, sort_order):
     return working_df.sort_values(["aum_100m", "code"], ascending=[ascending, True], na_position="last").reset_index(drop=True)
 
 
+def _build_stock_change_search_display_df(results_df):
+    if results_df is None or results_df.empty:
+        return pd.DataFrame(
+            columns=[
+                "日期",
+                "ETF",
+                "動作",
+                "股票",
+                "產業",
+                "張數變化",
+                "權重變化(%)",
+                "前日比重(%)",
+                "最新比重(%)",
+                "持有金額(估,萬)",
+            ]
+        )
+
+    working_df = results_df.copy()
+    return pd.DataFrame(
+        {
+            "日期": working_df["snapshot_date"],
+            "ETF": working_df["etf_name"].fillna("-") + " " + working_df["etf_code"].fillna(""),
+            "動作": working_df["change_label"].replace({"刪除": "移出"}),
+            "股票": working_df["stock_name"].fillna("-") + " " + working_df["stock_code"].fillna(""),
+            "產業": working_df["industry"].fillna("-"),
+            "張數變化": pd.to_numeric(working_df["shares_delta_lots"], errors="coerce").map(lambda value: "-" if pd.isna(value) else f"{value:+,.1f}"),
+            "權重變化(%)": pd.to_numeric(working_df["weight_delta"], errors="coerce").map(lambda value: "-" if pd.isna(value) else f"{value:+.2f}"),
+            "前日比重(%)": pd.to_numeric(working_df["old_weight"], errors="coerce").map(lambda value: "-" if pd.isna(value) else f"{value:.2f}"),
+            "最新比重(%)": pd.to_numeric(working_df["new_weight"], errors="coerce").map(lambda value: "-" if pd.isna(value) else f"{value:.2f}"),
+            "持有金額(估,萬)": pd.to_numeric(working_df["holding_amount_100m"], errors="coerce").map(
+                lambda value: "-" if pd.isna(value) else f"{value * 10000:,.1f}"
+            ),
+        }
+    )
+
+
+def _render_stock_change_search_panel():
+    date_bounds = load_etf_history_date_bounds()
+    min_date = datetime.strptime(date_bounds["min_snapshot_date"], "%Y-%m-%d").date()
+    max_date = datetime.strptime(date_bounds["max_snapshot_date"], "%Y-%m-%d").date()
+    default_start = max(min_date, max_date - timedelta(days=29))
+
+    st.markdown("### 股票反查 ETF 異動")
+    control_cols = st.columns([1.8, 1.0, 1.0])
+    with control_cols[0]:
+        query_text = st.text_input(
+            "股票查詢",
+            key="active_etf_stock_change_query",
+            placeholder="輸入股票代號或名稱，例如 2330 / 台積電",
+        ).strip()
+    with control_cols[1]:
+        start_date = st.date_input(
+            "開始日期",
+            value=st.session_state.get("active_etf_stock_change_start", default_start),
+            min_value=min_date,
+            max_value=max_date,
+            key="active_etf_stock_change_start",
+        )
+    with control_cols[2]:
+        end_date = st.date_input(
+            "結束日期",
+            value=st.session_state.get("active_etf_stock_change_end", max_date),
+            min_value=min_date,
+            max_value=max_date,
+            key="active_etf_stock_change_end",
+        )
+
+    if start_date > end_date:
+        st.warning("開始日期不能晚於結束日期。")
+        return
+
+    if not query_text:
+        st.caption("輸入股票代號或名稱，就會列出這段時間內哪些 ETF 在哪些天加減碼這檔股票。")
+        return
+
+    results_df = search_etf_stock_changes(query_text, start_date.isoformat(), end_date.isoformat())
+    if results_df.empty:
+        st.caption("這段時間內找不到符合條件的 ETF 持股變動。")
+        return
+
+    summary_cols = st.columns(3)
+    with summary_cols[0]:
+        st.metric("異動筆數", int(len(results_df)))
+    with summary_cols[1]:
+        st.metric("涉及 ETF", int(results_df["etf_code"].nunique()))
+    with summary_cols[2]:
+        st.metric("涉及日期", int(results_df["snapshot_date"].nunique()))
+
+    st.dataframe(
+        _build_stock_change_search_display_df(results_df),
+        use_container_width=True,
+        hide_index=True,
+    )
+    st.markdown("")
+
+
 def _render_overview_tab(detail_bundle):
     overview = detail_bundle["overview"]
     st.markdown("<div class='active-etf-section-title'>概覽</div>", unsafe_allow_html=True)
@@ -1186,18 +1283,6 @@ def render_active_etf_page(state):
             label_visibility="collapsed",
         )
     rerun_active_etf = False
-    refresh_all_history = False
-
-    history_job_id, history_job = ensure_background_data_job(
-        "active_etf_history_job_id",
-        "active_etf_history_refresh",
-        ("v1", datetime.now().strftime("%Y-%m-%d")),
-        refresh_all_active_etf_history_snapshots,
-        running_message="正在整理全部主動 ETF 當日快照...",
-        completed_message=lambda result=None, **_: f"已整理 {int((result or {}).get('count') or 0)} 檔主動 ETF 的當日快照",
-        failed_message="整理全部主動 ETF 快照失敗",
-        force_start=refresh_all_history,
-    )
 
     overview_cache_key = ("v3", datetime.now().strftime("%Y-%m-%d"), int(top_n))
     overview_job_id, overview_job = ensure_background_data_job(
@@ -1232,6 +1317,7 @@ def render_active_etf_page(state):
     selected_code = st.session_state.get("active_etf_selected_code")
 
     if view_mode != "detail":
+        _render_stock_change_search_panel()
         _render_etf_overview_list(raw_df)
         return
 

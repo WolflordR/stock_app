@@ -3,6 +3,7 @@ import io
 import sqlite3
 from datetime import datetime
 from pathlib import Path
+from functools import lru_cache
 
 from modules.core.http_utils import request_bytes
 
@@ -31,6 +32,8 @@ def init_stock_db():
                 market TEXT NOT NULL,
                 yfinance_symbol TEXT PRIMARY KEY,
                 industry_code TEXT,
+                paid_in_capital REAL,
+                issued_common_shares REAL,
                 updated_at TEXT NOT NULL
             )
             """
@@ -46,7 +49,25 @@ def init_stock_db():
             )
             """
         )
+        existing_columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(securities)").fetchall()
+        }
+        if "paid_in_capital" not in existing_columns:
+            conn.execute("ALTER TABLE securities ADD COLUMN paid_in_capital REAL")
+        if "issued_common_shares" not in existing_columns:
+            conn.execute("ALTER TABLE securities ADD COLUMN issued_common_shares REAL")
         conn.commit()
+
+
+def _parse_numeric(value):
+    text = str(value or "").strip().replace(",", "")
+    if text in {"", "-", "--", "---", "－"}:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
 
 
 def _download_csv_rows(url):
@@ -57,6 +78,23 @@ def _download_csv_rows(url):
     )
     text = raw.decode("utf-8-sig")
     return list(csv.DictReader(io.StringIO(text)))
+
+
+@lru_cache(maxsize=1)
+def _load_official_security_rows():
+    listed_rows = _download_csv_rows(LISTED_CSV_URL)
+    otc_rows = _download_csv_rows(OTC_CSV_URL)
+    merged = {}
+    for market, rows in (("TWSE", listed_rows), ("TPEx", otc_rows)):
+        for row in rows:
+            code = (row.get("公司代號") or "").strip()
+            if len(code) == 4 and code.isdigit():
+                merged[code] = {
+                    "market": market,
+                    "paid_in_capital": _parse_numeric(row.get("實收資本額")),
+                    "issued_common_shares": _parse_numeric(row.get("已發行普通股數或TDR原股發行股數")),
+                }
+    return merged
 
 
 def refresh_stock_db():
@@ -76,6 +114,8 @@ def refresh_stock_db():
             short_name = (row.get("公司簡稱") or row.get("公司名稱") or "").strip()
             full_name = (row.get("公司名稱") or "").strip()
             industry_code = (row.get("產業別") or "").strip()
+            paid_in_capital = _parse_numeric(row.get("實收資本額"))
+            issued_common_shares = _parse_numeric(row.get("已發行普通股數或TDR原股發行股數"))
 
             # 只保留一般常見的 4 碼股票代號，先排除權證、特別商品與雜訊資料。
             if not (len(code) == 4 and code.isdigit() and short_name):
@@ -89,6 +129,8 @@ def refresh_stock_db():
                     market,
                     f"{code}{suffix}",
                     industry_code,
+                    paid_in_capital,
+                    issued_common_shares,
                     updated_at,
                 )
             )
@@ -104,6 +146,8 @@ def refresh_stock_db():
                 market TEXT NOT NULL,
                 yfinance_symbol TEXT PRIMARY KEY,
                 industry_code TEXT,
+                paid_in_capital REAL,
+                issued_common_shares REAL,
                 updated_at TEXT NOT NULL
             )
             """
@@ -113,8 +157,8 @@ def refresh_stock_db():
         conn.executemany(
             """
             INSERT INTO securities (
-                code, name_zh, full_name_zh, market, yfinance_symbol, industry_code, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                code, name_zh, full_name_zh, market, yfinance_symbol, industry_code, paid_in_capital, issued_common_shares, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             securities,
         )
@@ -191,7 +235,7 @@ def find_security(stock_input):
     with _get_connection() as conn:
         row = conn.execute(
             """
-            SELECT code, name_zh, full_name_zh, market, yfinance_symbol, industry_code
+            SELECT code, name_zh, full_name_zh, market, yfinance_symbol, industry_code, paid_in_capital, issued_common_shares
             FROM securities
             WHERE yfinance_symbol = ? OR code = ?
             ORDER BY
@@ -203,6 +247,27 @@ def find_security(stock_input):
         ).fetchone()
 
     return dict(row) if row else None
+
+
+def get_security_share_profile(stock_input):
+    security = find_security(stock_input)
+    if security and security.get("issued_common_shares"):
+        return {
+            "code": security["code"],
+            "market": security.get("market"),
+            "paid_in_capital": security.get("paid_in_capital"),
+            "issued_common_shares": security.get("issued_common_shares"),
+        }
+
+    code = str(stock_input or "").strip().upper().split(".")[0]
+    official_rows = _load_official_security_rows()
+    profile = official_rows.get(code)
+    if not profile:
+        return None
+    return {
+        "code": code,
+        **profile,
+    }
 
 
 def get_securities_in_range(start_num, end_num):

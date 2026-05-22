@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import date, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -222,3 +223,103 @@ def upsert_etf_change_refresh_state(etf_code, target_days, latest_snapshot_date,
                 last_attempt_at,
             ),
         )
+
+
+def load_etf_history_date_bounds():
+    ensure_active_etf_history_db()
+    with _connect() as conn:
+        row = conn.execute(
+            """
+            SELECT
+                MIN(snapshot_date) AS min_snapshot_date,
+                MAX(snapshot_date) AS max_snapshot_date
+            FROM etf_change_snapshots
+            """
+        ).fetchone()
+
+    if not row or not row["max_snapshot_date"]:
+        today = date.today()
+        return {
+            "min_snapshot_date": (today - timedelta(days=30)).isoformat(),
+            "max_snapshot_date": today.isoformat(),
+        }
+    return dict(row)
+
+
+def search_etf_stock_changes(query_text, start_date, end_date):
+    normalized_query = str(query_text or "").strip()
+    if not normalized_query:
+        return pd.DataFrame(
+            columns=[
+                "snapshot_date",
+                "etf_code",
+                "etf_name",
+                "change_label",
+                "stock_code",
+                "stock_name",
+                "industry",
+                "shares_delta",
+                "shares_delta_lots",
+                "weight_delta",
+                "old_weight",
+                "new_weight",
+                "holding_amount_100m",
+                "new_shares",
+                "new_lots",
+            ]
+        )
+
+    ensure_active_etf_history_db()
+    start_text = str(start_date)
+    end_text = str(end_date)
+    compact_name_like = f"%{normalized_query.replace(' ', '')}%"
+    generic_like = f"%{normalized_query}%"
+
+    with _connect() as conn:
+        df = pd.read_sql_query(
+            """
+            SELECT
+                i.snapshot_date,
+                s.etf_code,
+                s.etf_name,
+                i.change_label,
+                i.stock_code,
+                i.stock_name,
+                i.industry,
+                i.shares_delta,
+                i.shares_delta_lots,
+                i.weight_delta,
+                i.old_weight,
+                i.new_weight,
+                i.holding_amount_100m,
+                i.new_shares,
+                i.new_lots
+            FROM etf_change_items AS i
+            JOIN etf_change_snapshots AS s
+                ON s.etf_code = i.etf_code
+               AND s.snapshot_date = i.snapshot_date
+            WHERE i.snapshot_date BETWEEN ? AND ?
+              AND (
+                    i.stock_code = ?
+                 OR i.stock_code LIKE ?
+                 OR i.stock_name LIKE ?
+                 OR REPLACE(i.stock_name, ' ', '') LIKE ?
+              )
+            ORDER BY
+                i.snapshot_date DESC,
+                ABS(COALESCE(i.weight_delta, 0)) DESC,
+                ABS(COALESCE(i.shares_delta, 0)) DESC,
+                s.etf_code ASC
+            """,
+            conn,
+            params=(
+                start_text,
+                end_text,
+                normalized_query.upper(),
+                generic_like,
+                generic_like,
+                compact_name_like,
+            ),
+        )
+
+    return df
