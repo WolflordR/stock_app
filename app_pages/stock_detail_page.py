@@ -614,7 +614,7 @@ def _render_today_chip_section(stock_code: str, symbol: str, end_date):
             <div class="stock-today-mini">
                 <div class="stock-today-mini-label">成交量</div>
                 <div class="stock-today-mini-value">{summary_text["成交量"]}</div>
-                <div class="stock-today-mini-note">資料日 {payload.get("history_row", {}).get("trade_date") or report.get("trade_date") or '-'}</div>
+                <div class="stock-today-mini-note">資料日 {history_row.get("trade_date") or report.get("trade_date") or '-'}</div>
             </div>
             <div class="stock-today-mini">
                 <div class="stock-today-mini-label">成交量增幅</div>
