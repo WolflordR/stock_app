@@ -38,6 +38,14 @@ def _format_lots(value: float | None) -> str:
     return f"{value:,.0f} 張"
 
 
+def _safe_ratio_percent(numerator: Any, denominator: Any) -> float | None:
+    numerator_value = _safe_float(numerator)
+    denominator_value = _safe_float(denominator)
+    if numerator_value is None or denominator_value is None or denominator_value == 0:
+        return None
+    return numerator_value / denominator_value * 100.0
+
+
 def _clean_stock_title(value: str) -> str:
     text = str(value or "").strip()
     for token in ["籌碼相關", "券商分點績效", "獲利分析", "－", "-", "—"]:
@@ -236,7 +244,7 @@ def build_short_term_broker_report(stock_code: str, *, top_n: int = 15, days_win
     total_volume_lots = _load_volume_window_lots(stock_code, trade_date, days_window) if trade_date else None
     share_profile = get_security_share_profile(stock_code) or {}
     issued_common_shares = _safe_float(share_profile.get("issued_common_shares"))
-    issued_common_lots = (issued_common_shares / 1000.0) if issued_common_shares else None
+    issued_common_lots = (issued_common_shares / 1000.0) if issued_common_shares is not None and issued_common_shares != 0 else None
 
     short_term_buy_lots = sum(row["net_lots_value"] or 0.0 for row in buy_rows if row["is_short_term"])
     short_term_sell_lots = sum(abs(row["net_lots_value"] or 0.0) for row in sell_rows if row["is_short_term"])
@@ -249,19 +257,19 @@ def build_short_term_broker_report(stock_code: str, *, top_n: int = 15, days_win
 
     if total_volume_lots and total_volume_lots > 0:
         for row in buy_rows + sell_rows:
-            row["weight_pct"] = abs(row.get("net_lots_value") or 0.0) / total_volume_lots * 100.0
+            row["weight_pct"] = _safe_ratio_percent(abs(row.get("net_lots_value") or 0.0), total_volume_lots)
     else:
         for row in buy_rows + sell_rows:
             row["weight_pct"] = None
 
-    main_net_pct = (main_net_lots / total_volume_lots * 100.0) if total_volume_lots else None
-    concentration_pct = (main_net_lots / total_volume_lots * 100.0) if total_volume_lots else None
-    short_term_buy_pct = (short_term_buy_lots / total_volume_lots * 100.0) if total_volume_lots else None
-    short_term_sell_pct = (short_term_sell_lots / total_volume_lots * 100.0) if total_volume_lots else None
-    buy_top5_pct = (buy_top5_lots / total_volume_lots * 100.0) if total_volume_lots else None
-    sell_top5_pct = (sell_top5_lots / total_volume_lots * 100.0) if total_volume_lots else None
-    estimated_float_pct = (concentration_lots / issued_common_lots * 100.0) if issued_common_lots else None
-    interval_turnover_pct = (total_volume_lots / issued_common_lots * 100.0) if issued_common_lots else None
+    main_net_pct = _safe_ratio_percent(main_net_lots, total_volume_lots)
+    concentration_pct = _safe_ratio_percent(main_net_lots, total_volume_lots)
+    short_term_buy_pct = _safe_ratio_percent(short_term_buy_lots, total_volume_lots)
+    short_term_sell_pct = _safe_ratio_percent(short_term_sell_lots, total_volume_lots)
+    buy_top5_pct = _safe_ratio_percent(buy_top5_lots, total_volume_lots)
+    sell_top5_pct = _safe_ratio_percent(sell_top5_lots, total_volume_lots)
+    estimated_float_pct = _safe_ratio_percent(concentration_lots, issued_common_lots)
+    interval_turnover_pct = _safe_ratio_percent(total_volume_lots, issued_common_lots)
 
     signal_label, signal_reason = _derive_signal(
         main_net_pct=main_net_pct,
