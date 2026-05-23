@@ -3,11 +3,11 @@ from __future__ import annotations
 import pickle
 import sqlite3
 import time
-from pathlib import Path
+
+from modules.core.project_paths import data_path
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-CACHE_DB_PATH = PROJECT_ROOT / "ui_persistent_cache.db"
+CACHE_DB_PATH = data_path("ui_persistent_cache.db")
 
 
 def _get_connection():

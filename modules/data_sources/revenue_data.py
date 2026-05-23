@@ -2,17 +2,15 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 import io
-from pathlib import Path
 import sqlite3
 
 import pandas as pd
 
+from modules.core.project_paths import data_path
 from modules.core.http_utils import request_text
 from modules.industry.industry_taxonomy import TECH_INDUSTRY_NAMES
 
-
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DB_PATH = PROJECT_ROOT / "revenue_cache.db"
+DB_PATH = data_path("revenue_cache.db")
 MONTHLY_REVENUE_URLS = {
     "上市": "https://mopsfin.twse.com.tw/opendata/t187ap05_L.csv",
     "上櫃": "https://mopsfin.twse.com.tw/opendata/t187ap05_O.csv",

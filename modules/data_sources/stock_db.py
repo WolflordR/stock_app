@@ -2,13 +2,12 @@ import csv
 import io
 import sqlite3
 from datetime import datetime
-from pathlib import Path
 from functools import lru_cache
 
 from modules.core.http_utils import request_bytes
+from modules.core.project_paths import data_path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DB_PATH = PROJECT_ROOT / "stocks.db"
+DB_PATH = data_path("stocks.db")
 
 LISTED_CSV_URL = "https://mopsfin.twse.com.tw/opendata/t187ap03_L.csv"
 OTC_CSV_URL = "https://dts.twse.com.tw/opendata/t187ap03_O.csv"

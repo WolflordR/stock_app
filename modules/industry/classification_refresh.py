@@ -4,20 +4,18 @@ import csv
 import re
 import sqlite3
 from datetime import datetime
-from pathlib import Path
 
 import pandas as pd
 
+from modules.core.project_paths import data_path
 from modules.industry.industry_taxonomy import THEME_DEFINITIONS
 from modules.industry.industry_taxonomy import THEME_DEFINITIONS_VERSION
 from modules.data_sources.revenue_data import get_latest_monthly_revenue
 from modules.data_sources.stock_db import DB_PATH as STOCK_DB_PATH
 from modules.data_sources.stock_db import ensure_stock_db
 
-
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DB_PATH = PROJECT_ROOT / "company_links.db"
-THEME_OVERRIDE_PATH = PROJECT_ROOT / "industry_theme_overrides.csv"
+DB_PATH = data_path("company_links.db")
+THEME_OVERRIDE_PATH = data_path("industry_theme_overrides.csv")
 
 ENGLISH_ALIAS_OVERRIDES = {
     "2330": ["TSMC", "Taiwan Semiconductor"],

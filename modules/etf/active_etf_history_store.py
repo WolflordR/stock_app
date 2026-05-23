@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import date, timedelta
-from pathlib import Path
 
 import pandas as pd
 
+from modules.core.project_paths import data_path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DB_PATH = PROJECT_ROOT / "active_etf_history.db"
+
+DB_PATH = data_path("active_etf_history.db")
 
 
 def _connect():

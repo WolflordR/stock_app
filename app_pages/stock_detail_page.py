@@ -6,7 +6,7 @@ import streamlit as st
 
 from modules.core.trading_calendar import resolve_recent_trade_date, resolve_trade_dates_in_range
 from modules.data_sources.broker_branch_data import fetch_broker_branch_summary, fetch_broker_branch_trace
-from modules.data_sources.chip_data import get_recent_institutional_snapshots
+from modules.data_sources.chip_data import get_institutional_detail_for_stock, get_recent_institutional_snapshots
 from modules.data_sources.broker_branch_short_term import build_short_term_broker_report, format_short_term_summary
 from modules.data_sources.market_watch import (
     fetch_tpex_after_market_quotes,
@@ -21,12 +21,13 @@ from modules.data_sources.stock_db import find_security, get_stock_name
 from modules.ui.ui_backtest_results import render_stock_detail_workspace
 
 
-BROKER_BRANCH_CACHE_VERSION = "broker_branch_yahoo_v1"
+BROKER_BRANCH_CACHE_VERSION = "broker_branch_hybrid_v3"
+TODAY_CHIP_CACHE_VERSION = "today_chip_v4"
 
 
 @st.cache_data(show_spinner=False, ttl=1800)
 def _load_broker_branch_summary(stock_code: str, trade_date_key: str, cache_version: str):
-    return fetch_broker_branch_summary(stock_code)
+    return fetch_broker_branch_summary(stock_code, top_n=15, trade_date=trade_date_key)
 
 
 @st.cache_data(show_spinner=False, ttl=1800)
@@ -182,7 +183,7 @@ def _load_official_volume_pair(stock_code: str, end_date) -> tuple[float | None,
 
 
 @st.cache_data(show_spinner=False, ttl=1800)
-def _load_today_chip_snapshot(stock_code: str, symbol: str, end_date):
+def _load_today_chip_snapshot(stock_code: str, symbol: str, end_date, cache_version: str):
     report = build_short_term_broker_report(stock_code, days_window=1)
     history_df = fetch_price_history(
         symbol,
@@ -227,19 +228,18 @@ def _load_today_chip_snapshot(stock_code: str, symbol: str, end_date):
     else:
         price_volume_state = ("量價中性", "價格與量能沒有特別偏離常態。")
 
-    institutional_detail = None
-    snapshots = get_recent_institutional_snapshots(end_date, trading_days=1)
-    if snapshots:
-        rows = snapshots[-1].get("rows") or []
-        matched = next((row for row in rows if str(row.get("code")) == str(stock_code)), None)
-        if matched:
-            institutional_detail = {
-                "trade_date": snapshots[-1].get("trade_date"),
-                "foreign_net": matched.get("foreign_net"),
-                "trust_net": matched.get("trust_net"),
-                "dealer_net": matched.get("dealer_net"),
-                "total_net": matched.get("total_net"),
-            }
+    security = find_security(stock_code) or {}
+    institutional_detail = get_institutional_detail_for_stock(
+        stock_code,
+        latest_row["trade_date"],
+        market=security.get("market") or "TWSE",
+    )
+    if institutional_detail is None:
+        institutional_detail = get_institutional_detail_for_stock(
+            stock_code,
+            latest_row["trade_date"],
+            market="TWSE",
+        )
 
     return {
         "short_term_report": report,
@@ -550,7 +550,7 @@ def _render_today_chip_section(stock_code: str, symbol: str, end_date):
     _inject_stock_detail_css()
 
     try:
-        payload = _load_today_chip_snapshot(stock_code, symbol, end_date)
+        payload = _load_today_chip_snapshot(stock_code, symbol, end_date, TODAY_CHIP_CACHE_VERSION)
     except Exception as exc:
         st.warning(f"目前抓不到今日籌碼資料：{exc}")
         return
@@ -775,7 +775,13 @@ def _render_short_term_broker_section(stock_code: str):
     meta_cols[0].metric("股票", report.get("stock_title") or stock_code)
     meta_cols[1].metric("短衝買方席次", int(summary.get("short_term_buy_count") or 0))
     meta_cols[2].metric("短衝賣方席次", int(summary.get("short_term_sell_count") or 0))
-    meta_cols[3].link_button("查看來源頁", report.get("source_url") or "https://histock.tw")
+    source_url = report.get("source_url") or ""
+    if source_url:
+        meta_cols[3].link_button("查看來源頁", source_url)
+    else:
+        meta_cols[3].metric("來源", report.get("source_label") or "官方匯入資料")
+    source_label = report.get("source_label") or "分點榜來源"
+    st.caption(f"目前分點來源：{source_label}")
 
     buy_rows = report.get("buy_rows") or []
     sell_rows = report.get("sell_rows") or []
@@ -789,6 +795,18 @@ def _render_short_term_broker_section(stock_code: str):
             if row.get("active_days"):
                 tag_pieces.append(f"近{report.get('days_window') or 1}日活躍 {int(row['active_days'])} 天")
             tag_line = " / ".join(tag_pieces) if tag_pieces else "一般分點"
+            right_lines = []
+            if row.get("avg_price_value") is not None:
+                right_lines.append(
+                    f'<div class="stock-short-term-rank-price">均價 {_format_price_text(row.get("avg_price_value"))}</div>'
+                )
+            if row.get("total_profit_k_value") is not None:
+                right_lines.append(
+                    f'<div class="stock-short-term-rank-profit {variant}">損益 {_format_profit_k_text(row.get("total_profit_k_value"))} 萬</div>'
+                )
+            right_lines.append(
+                f'<div class="stock-short-term-rank-note">買進 {row.get("buy_shares") or "-"} ｜ 賣出 {row.get("sell_shares") or "-"}</div>'
+            )
             panel_rows.append(
                 dedent(
                     f"""
@@ -802,9 +820,7 @@ def _render_short_term_broker_section(stock_code: str):
                             <div class="stock-short-term-rank-tagline">{tag_line}</div>
                         </div>
                         <div class="stock-short-term-rank-right">
-                            <div class="stock-short-term-rank-price">均價 {_format_price_text(row.get('avg_price_value'))}</div>
-                            <div class="stock-short-term-rank-profit {variant}">損益 {_format_profit_k_text(row.get('total_profit_k_value'))} 萬</div>
-                            <div class="stock-short-term-rank-note">買進 {row.get('buy_shares') or '-'} ｜ 賣出 {row.get('sell_shares') or '-'}</div>
+                            {''.join(right_lines)}
                         </div>
                     </div>
                     """
@@ -851,75 +867,46 @@ def _render_broker_branch_section(stock_code: str):
         return
 
     header_cols = st.columns([1.2, 1.0, 1.0, 1.2])
-    header_cols[0].metric("股票", summary_bundle.get("stock_code") or stock_code)
+    header_cols[0].metric("股票", summary_bundle.get("stock_title") or summary_bundle.get("stock_code") or stock_code)
     header_cols[1].metric("買超分點數", len(buy_rows))
     header_cols[2].metric("賣超分點數", len(sell_rows))
-    header_cols[3].link_button("查看來源頁", summary_bundle.get("source_url") or "https://tw.stock.yahoo.com")
+    source_url = summary_bundle.get("source_url") or ""
+    if source_url:
+        header_cols[3].link_button("查看來源頁", source_url)
+    else:
+        header_cols[3].metric("來源", summary_bundle.get("source_label") or "官方匯入資料")
+    st.caption(f"目前分點來源：{summary_bundle.get('source_label') or '分點榜來源'}")
+
+    def _compact_branch_table(rows):
+        return [
+            {
+                "分點": row.broker_branch,
+                "買賣超(張)": row.net_shares,
+                "買張": row.buy_shares,
+                "賣張": row.sell_shares,
+            }
+            for row in rows
+        ]
 
     table_cols = st.columns(2)
     with table_cols[0]:
         st.markdown("**買超分點排行**")
         st.dataframe(
-            [row.to_display_dict() for row in buy_rows],
+            _compact_branch_table(buy_rows),
             use_container_width=True,
             hide_index=True,
         )
     with table_cols[1]:
         st.markdown("**賣超分點排行**")
         st.dataframe(
-            [row.to_display_dict() for row in sell_rows],
+            _compact_branch_table(sell_rows),
             use_container_width=True,
             hide_index=True,
         )
-
-    selection_options = []
-    for side_label, rows in (("買超榜", buy_rows), ("賣超榜", sell_rows)):
-        for index, row in enumerate(rows, start=1):
-            if not row.detail_url:
-                continue
-            selection_options.append(
-                {
-                    "label": f"{row.broker_branch}｜{side_label} #{index}",
-                    "detail_url": row.detail_url,
-                    "branch_name": row.broker_branch,
-                }
-            )
-
-    if not selection_options:
-        st.info("目前 Yahoo 來源只提供當日買賣分點榜，單一分點歷史明細暫時不提供。")
-        return
-
-    selected_label = st.selectbox(
-        "查看單一分點明細",
-        options=[option["label"] for option in selection_options],
-        key=f"broker_branch_select_{stock_code}",
-    )
-    selected_option = next(
-        option for option in selection_options if option["label"] == selected_label
-    )
-
-    try:
-        trace_bundle = _load_broker_branch_trace(selected_option["detail_url"])
-    except Exception as exc:
-        st.warning(f"目前抓不到 {selected_option['branch_name']} 的分點明細：{exc}")
-        return
-
-    trace_cols = st.columns(4)
-    latest_net = trace_bundle.get("latest_net_shares")
-    recent_5_net = trace_bundle.get("recent_5_net_shares")
-    recent_20_net = trace_bundle.get("recent_20_net_shares")
-    trace_cols[0].metric("選定分點", selected_option["branch_name"])
-    trace_cols[1].metric("最新一日買賣超", f"{latest_net:,.1f} 張" if latest_net is not None else "-")
-    trace_cols[2].metric("近5日買賣超", f"{recent_5_net:,.1f} 張")
-    trace_cols[3].metric("近20日買賣超", f"{recent_20_net:,.1f} 張")
-
-    st.caption(trace_bundle.get("title") or "券商分點個股進出")
-    st.dataframe(
-        trace_bundle.get("rows") or [],
-        use_container_width=True,
-        hide_index=True,
-    )
-    st.link_button("開啟這個分點來源頁", trace_bundle.get("source_url") or selected_option["detail_url"])
+    if "Yahoo" in str(summary_bundle.get("source_label") or ""):
+        st.info("目前 Yahoo 來源只提供當日買賣分點榜，單一分點歷史明細、均價與損益暫時不提供。")
+    else:
+        st.info("目前顯示的是官方匯入分點日報；如果你補匯更多交易日，後面可以直接擴充成多日分點統計。")
 
 
 def render_stock_detail_page(state):

@@ -4,16 +4,14 @@ import ssl
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta
-from pathlib import Path
 
 import pandas as pd
 
+from modules.core.project_paths import data_path
 from modules.data_sources.market_watch import fetch_tpex_daily_quotes
 from modules.data_sources.market_watch import fetch_twse_daily_quotes
 
-
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DB_PATH = PROJECT_ROOT / "chip_cache.db"
+DB_PATH = data_path("chip_cache.db")
 TWSE_T86_URL = "https://www.twse.com.tw/rwd/zh/fund/T86"
 INVESTOR_COLUMN_MAP = {
     "三大法人": "total_net",
@@ -396,6 +394,40 @@ def get_recent_institutional_snapshots(anchor_date, trading_days=3, max_calendar
             break
 
     return list(reversed(snapshots))
+
+
+def _normalize_market_code(market):
+    text = str(market or "").strip().upper()
+    if text in {"TWSE", "上市"}:
+        return "TWSE"
+    if text in {"TPEX", "TPEx", "上櫃", "OTC"}:
+        return "TPEX"
+    return text or "TWSE"
+
+
+def get_institutional_detail_for_stock(stock_code, trade_date, market="TWSE"):
+    """直接回傳單一股票在指定交易日的三大法人淨買賣超。"""
+    init_chip_cache()
+    trade_date_str = _normalize_display_trade_date(trade_date)
+    market_code = _normalize_market_code(market)
+    if market_code != "TWSE":
+        return None
+
+    rows = _load_exact_cached_rows("TWSE", trade_date_str)
+    if not rows:
+        rows = fetch_twse_institutional_trading(trade_date_str)
+
+    matched = next((row for row in rows if str(row.get("code")) == str(stock_code)), None)
+    if not matched:
+        return None
+
+    return {
+        "trade_date": trade_date_str,
+        "foreign_net": matched.get("foreign_net"),
+        "trust_net": matched.get("trust_net"),
+        "dealer_net": matched.get("dealer_net"),
+        "total_net": matched.get("total_net"),
+    }
 
 
 def build_consecutive_institutional_rankings(

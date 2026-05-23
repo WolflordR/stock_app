@@ -6,10 +6,13 @@ stock_env/
 *.pyo
 *.pyd
 
-ui_persistent_cache.db
-price_cache.db
-revenue_cache.db
-chip_cache.db
-active_etf_history.db
+data/ui_persistent_cache.db
+data/price_cache.db
+data/revenue_cache.db
+data/chip_cache.db
+data/active_etf_history.db
+data/broker_daily_trades.db
+*.db-wal
+*.db-shm
 
 .streamlit/secrets.toml

@@ -2,13 +2,13 @@ import sqlite3
 import io
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime, timedelta
-from pathlib import Path
 
 import pandas as pd
 import yfinance as yf
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DB_PATH = PROJECT_ROOT / "price_cache.db"
+from modules.core.project_paths import data_path
+
+DB_PATH = data_path("price_cache.db")
 META_COLUMN_DEFINITIONS = {
     "first_cached_date": "TEXT",
     "last_cached_date": "TEXT",

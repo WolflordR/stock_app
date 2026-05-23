@@ -1,19 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
+from modules.core.project_paths import data_path
 from modules.core.trading_calendar import resolve_recent_trade_date, resolve_trade_dates_in_range
 from modules.data_sources.broker_branch_data import BrokerBranchRow, fetch_broker_branch_summary, fetch_broker_branch_trace
 from modules.data_sources.market_watch import fetch_tpex_daily_quotes, fetch_twse_daily_quotes
 from modules.data_sources.stock_db import get_security_share_profile
 
-
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-SHORT_TERM_TAGS_CSV = PROJECT_ROOT / "short_term_broker_tags.csv"
+SHORT_TERM_TAGS_CSV = data_path("short_term_broker_tags.csv")
 
 
 def _safe_float(value: Any) -> float | None:
@@ -220,12 +218,12 @@ def _derive_signal(
 
 
 def build_short_term_broker_report(stock_code: str, *, top_n: int = 15, days_window: int = 1) -> dict[str, Any]:
-    summary_bundle = fetch_broker_branch_summary(stock_code, top_n=top_n)
-    tag_lookup = _build_tag_lookup()
-
     quote_payload = _load_latest_quote_row(stock_code)
     quote_row = quote_payload.get("row") or {}
     latest_close_value = _safe_float(quote_row.get("close"))
+    requested_trade_date = quote_payload.get("trade_date")
+    summary_bundle = fetch_broker_branch_summary(stock_code, top_n=top_n, trade_date=requested_trade_date)
+    tag_lookup = _build_tag_lookup()
 
     base_buy_rows = [_enrich_branch_row(row, tag_lookup, latest_close_value) for row in summary_bundle.get("buy_side") or []]
     base_sell_rows = [_enrich_branch_row(row, tag_lookup, latest_close_value) for row in summary_bundle.get("sell_side") or []]
@@ -298,6 +296,7 @@ def build_short_term_broker_report(stock_code: str, *, top_n: int = 15, days_win
         "stock_code": stock_code,
         "stock_title": _clean_stock_title(summary_bundle.get("stock_title") or stock_code),
         "source_url": summary_bundle.get("source_url"),
+        "source_label": summary_bundle.get("source_label") or "",
         "trade_date": trade_date,
         "history_mode": "current_snapshot_only" if days_window > 1 and not any(row.get("detail_url") for row in (base_buy_rows + base_sell_rows)) else "window_trace",
         "days_window": days_window,

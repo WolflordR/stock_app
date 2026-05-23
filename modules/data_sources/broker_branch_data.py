@@ -6,6 +6,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from modules.core.http_utils import request_text
+from modules.data_sources.official_broker_import import (
+    get_latest_official_broker_summary,
+    get_official_broker_summary,
+)
 from modules.data_sources.stock_db import find_security, get_stock_name
 
 
@@ -62,6 +66,15 @@ def _candidate_yahoo_symbols(stock_code: str) -> list[str]:
         if candidate not in symbols:
             symbols.append(candidate)
     return symbols
+
+
+def _normalize_market_code(market: str | None) -> str:
+    text = str(market or "").strip().upper()
+    if text in {"TWSE", "上市"}:
+        return "TWSE"
+    if text in {"TPEX", "TWO", "OTC", "上櫃"}:
+        return "TPEX"
+    return text or "TWSE"
 
 
 def _extract_root_app_json(html: str) -> dict[str, Any]:
@@ -166,17 +179,72 @@ def _build_row(entry: dict[str, Any]) -> BrokerBranchRow:
     )
 
 
-def fetch_broker_branch_summary(stock_input: str, *, top_n: int = 12) -> dict[str, Any]:
+def _build_official_row(entry: dict[str, Any], *, side: str) -> BrokerBranchRow:
+    net_lots = _safe_float(entry.get("net_shares"))
+    buy_lots = _safe_float(entry.get("buy_shares"))
+    sell_lots = _safe_float(entry.get("sell_shares"))
+    avg_price = None
+    if side == "buy":
+        avg_price = _safe_float(entry.get("avg_buy_price"))
+    elif side == "sell":
+        avg_price = _safe_float(entry.get("avg_sell_price"))
+    if avg_price is None:
+        avg_price = _safe_float(entry.get("avg_buy_price")) or _safe_float(entry.get("avg_sell_price"))
+
+    return BrokerBranchRow(
+        broker_branch=_clean_text(entry.get("broker_name") or "-"),
+        performance_pct="-",
+        total_profit_k="-",
+        realized_profit_k="-",
+        unrealized_profit_k="-",
+        net_shares=_format_lots(net_lots),
+        buy_shares=_format_lots(buy_lots),
+        sell_shares=_format_lots(sell_lots),
+        avg_price=_format_price(avg_price),
+        avg_buy=_format_price(_safe_float(entry.get("avg_buy_price"))),
+        avg_sell=_format_price(_safe_float(entry.get("avg_sell_price"))),
+        close_price="-",
+        detail_url="",
+    )
+
+
+def _build_official_summary_bundle(stock_code: str, official_summary: dict[str, Any], *, top_n: int) -> dict[str, Any]:
+    stock_name = get_stock_name(stock_code)
+    stock_title = _clean_stock_title(f"{stock_name} ({stock_code})")
+    buy_rank = list(official_summary.get("buy_rank") or [])[:top_n]
+    sell_rank = list(official_summary.get("sell_rank") or [])[:top_n]
+    return {
+        "stock_code": stock_code,
+        "stock_title": stock_title,
+        "trade_date": official_summary.get("trade_date") or "",
+        "trade_volume_rate": None,
+        "source_url": "",
+        "source_label": "官方匯入分點日報",
+        "buy_side": [_build_official_row(entry, side="buy") for entry in buy_rank],
+        "sell_side": [_build_official_row(entry, side="sell") for entry in sell_rank],
+    }
+
+
+def fetch_broker_branch_summary(stock_input: str, *, top_n: int = 12, trade_date: str | None = None) -> dict[str, Any]:
     stock_code = _normalize_stock_code(stock_input)
     if not stock_code:
         raise ValueError("無法辨識股票代碼。")
+
+    security = find_security(stock_code)
+    market = _normalize_market_code((security or {}).get("market"))
+    official_summary = (
+        get_official_broker_summary(stock_code, trade_date, market=market)
+        if trade_date
+        else get_latest_official_broker_summary(stock_code, market=market)
+    )
+    if official_summary:
+        return _build_official_summary_bundle(stock_code, official_summary, top_n=top_n)
 
     payload = _load_yahoo_broker_payload(stock_code)
     broker_data = payload["data"]
     buy_entries = list(broker_data.get("buyerRankList") or [])[:top_n]
     sell_entries = list(broker_data.get("sellerRankList") or [])[:top_n]
 
-    security = find_security(stock_code)
     stock_name = security.get("name_zh") if security else get_stock_name(stock_code)
     yahoo_symbol = payload["yahoo_symbol"]
     stock_title = _clean_stock_title(f"{stock_name} ({yahoo_symbol.split('.')[0]})")
@@ -187,6 +255,7 @@ def fetch_broker_branch_summary(stock_input: str, *, top_n: int = 12) -> dict[st
         "trade_date": str(broker_data.get("date") or "").split("T")[0],
         "trade_volume_rate": _safe_float(broker_data.get("tradeVolumeRate")),
         "source_url": payload["source_url"],
+        "source_label": "Yahoo 當日分點榜",
         "buy_side": [_build_row(entry) for entry in buy_entries],
         "sell_side": [_build_row(entry) for entry in sell_entries],
     }
