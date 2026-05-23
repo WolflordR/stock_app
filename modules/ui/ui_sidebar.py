@@ -6,6 +6,7 @@ from modules.data_sources.stock_db import ensure_stock_db, get_securities_in_ran
 from modules.backtest.strategy_config import BUY_STRATEGY_METADATA, DEFAULT_BUY_STRATEGIES, DEFAULT_SELL_STRATEGIES, SELL_STRATEGY_METADATA
 from modules.ui.ui_status import render_backtest_job_sidebar_status
 from modules.ui.ui_state import seed_strategy_dialog_state
+from modules.ui.ui_theme import render_background_theme_control
 
 
 def render_sidebar(selected_view):
@@ -67,6 +68,8 @@ def render_sidebar(selected_view):
 
     with st.sidebar:
         st.header("設定")
+        render_background_theme_control()
+        st.divider()
 
         revenue_profile_version = "tech_revenue_loose_v1"
         if st.session_state.get("revenue_profile_version") != revenue_profile_version:
