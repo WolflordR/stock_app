@@ -11,8 +11,6 @@ from modules.etf.active_etf_history_store import search_etf_stock_changes
 from modules.core.internal_nav import navigate_to_active_etf
 from modules.ui.ui_data import load_active_etf_detail_data
 from modules.ui.ui_data import load_active_etf_overview_data
-from modules.ui.ui_jobs import ensure_background_data_job, get_background_data_job_manager
-from modules.ui.ui_status import render_background_data_job_status
 
 
 def _format_pct(value, digits=2):
@@ -1283,30 +1281,20 @@ def render_active_etf_page(state):
             label_visibility="collapsed",
         )
     rerun_active_etf = False
+    st.session_state.pop("active_etf_overview_job_id", None)
+    st.session_state.pop("active_etf_detail_job_id", None)
 
     overview_cache_key = ("v3", datetime.now().strftime("%Y-%m-%d"), int(top_n))
-    overview_job_id, overview_job = ensure_background_data_job(
-        "active_etf_overview_job_id",
-        "active_etf_overview",
-        overview_cache_key,
-        load_active_etf_overview_data,
-        args=("v3", datetime.now().strftime("%Y-%m-%d"), int(top_n)),
-        running_message="正在整理主動式 ETF 最新動向...",
-        completed_message="主動式 ETF 總覽已整理完成",
-        failed_message="主動式 ETF 總覽整理失敗",
-        force_start=rerun_active_etf,
-    )
-
-    if overview_job and overview_job["status"] == "failed":
-        failed_job = get_background_data_job_manager().get_job(overview_job_id, include_result=False)
-        st.error(f"讀取主動式 ETF 總覽失敗：{failed_job.get('error') or '未知錯誤'}")
+    try:
+        with st.spinner("正在整理主動式 ETF 最新動向..."):
+            overview_bundle = load_active_etf_overview_data(
+                overview_cache_key[0],
+                overview_cache_key[1],
+                overview_cache_key[2],
+            )
+    except Exception as exc:
+        st.error(f"讀取主動式 ETF 總覽失敗：{exc}")
         return
-    if overview_job["status"] != "completed":
-        st.info("主動式 ETF 資料背景整理中，完成後會自動刷新。")
-        render_background_data_job_status("active_etf_overview_job_id", "主動 ETF 總覽背景任務")
-        return
-
-    overview_bundle = get_background_data_job_manager().get_job(overview_job_id, include_result=True).get("result")
     if not overview_bundle:
         st.caption("目前抓不到可用的主動式 ETF 資料。")
         return
@@ -1330,28 +1318,16 @@ def render_active_etf_page(state):
         return
 
     detail_cache_key = ("v5", datetime.now().strftime("%Y-%m-%d"), selected_code)
-    detail_job_id, detail_job = ensure_background_data_job(
-        "active_etf_detail_job_id",
-        "active_etf_detail",
-        detail_cache_key,
-        load_active_etf_detail_data,
-        args=("v5", datetime.now().strftime("%Y-%m-%d"), selected_code),
-        running_message=f"正在整理 {selected_code} 主動 ETF 明細...",
-        completed_message=f"{selected_code} 主動 ETF 明細已整理完成",
-        failed_message=f"{selected_code} 主動 ETF 明細整理失敗",
-        force_start=rerun_active_etf,
-    )
-
-    if detail_job and detail_job["status"] == "failed":
-        failed_job = get_background_data_job_manager().get_job(detail_job_id, include_result=False)
-        st.error(f"讀取這檔 ETF 明細失敗：{failed_job.get('error') or '未知錯誤'}")
+    try:
+        with st.spinner(f"正在整理 {selected_code} 主動 ETF 明細..."):
+            detail_bundle = load_active_etf_detail_data(
+                detail_cache_key[0],
+                detail_cache_key[1],
+                detail_cache_key[2],
+            )
+    except Exception as exc:
+        st.error(f"讀取這檔 ETF 明細失敗：{exc}")
         return
-    if detail_job["status"] != "completed":
-        st.info("這檔 ETF 的明細背景整理中，完成後會自動刷新。")
-        render_background_data_job_status("active_etf_detail_job_id", "主動 ETF 明細背景任務")
-        return
-
-    detail_bundle = get_background_data_job_manager().get_job(detail_job_id, include_result=True).get("result")
     if not detail_bundle:
         st.caption("目前抓不到這檔 ETF 的明細。")
         return

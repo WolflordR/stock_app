@@ -458,7 +458,7 @@ def refresh_company_links_db():
         )
         conn.commit()
 
-    from classification_queries import clear_query_caches
+    from modules.industry.classification_queries import clear_query_caches
 
     clear_query_caches()
     return {

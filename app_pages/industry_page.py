@@ -17,8 +17,7 @@ from modules.industry.industry_page_sections import (
     render_theme_members_tab,
 )
 from modules.core.trading_calendar import resolve_recent_trade_date
-from modules.ui.ui_jobs import ensure_background_data_job, get_background_data_job_manager
-from modules.ui.ui_status import render_background_data_job_status
+from modules.ui.ui_data import load_industry_rotation_data
 
 
 def render_industry_rotation_page(state):
@@ -121,7 +120,8 @@ def render_industry_rotation_page(state):
     clear_rotation = action_cols[2].button("清除結果", use_container_width=True, key="clear_industry_rotation")
     action_cols[3].caption("只有按下按鈕時才整理產業輪動。")
     if clear_rotation:
-        st.session_state["industry_rotation_job_id"] = None
+        st.session_state.pop("industry_rotation_result_cache", None)
+        st.session_state.pop("industry_rotation_job_id", None)
         st.rerun()
 
     cache_key = (
@@ -130,35 +130,30 @@ def render_industry_rotation_page(state):
         str(effective_trade_date),
         int(history_trade_days),
     )
-    job_id, job = ensure_background_data_job(
-        "industry_rotation_job_id",
-        "industry_rotation",
-        cache_key,
-        build_industry_rotation_bundle,
-        args=(effective_trade_date,),
-        kwargs={"history_trade_days": history_trade_days},
-        running_message="正在整理科技股產業輪動...",
-        completed_message="產業輪動資料已整理完成",
-        failed_message="產業輪動資料整理失敗",
-        autostart=False,
-        force_start=(run_rotation or rerun_rotation),
-    )
-
-    if job and job["status"] == "failed":
-        failed_job = get_background_data_job_manager().get_job(job_id, include_result=False)
-        st.error(f"讀取產業輪動資料失敗：{failed_job.get('error') or '未知錯誤'}")
+    rotation_cache = st.session_state.get("industry_rotation_result_cache")
+    should_compute = bool(run_rotation or rerun_rotation)
+    if not should_compute and rotation_cache and rotation_cache.get("cache_key") == cache_key:
+        rotation_bundle = rotation_cache.get("result")
+    elif not should_compute:
+        st.info("目前是手動模式。按上面的 `執行` 後，才會整理產業輪動資料。")
         return
-
-    if not job:
-        st.info("目前是手動模式。按上面的 `執行產業輪動整理` 後，才會丟進背景 queue。")
-        return
-
-    if job["status"] != "completed":
-        st.info("產業輪動資料背景整理中，完成後會自動刷新。")
-        render_background_data_job_status("industry_rotation_job_id", "產業輪動背景任務")
-        return
-
-    rotation_bundle = get_background_data_job_manager().get_job(job_id, include_result=True).get("result")
+    else:
+        try:
+            with st.spinner("正在整理科技股產業輪動..."):
+                rotation_bundle = load_industry_rotation_data(
+                    cache_key[0],
+                    cache_key[1],
+                    effective_trade_date,
+                    history_trade_days,
+                )
+            st.session_state["industry_rotation_result_cache"] = {
+                "cache_key": cache_key,
+                "result": rotation_bundle,
+            }
+            st.session_state.pop("industry_rotation_job_id", None)
+        except Exception as exc:
+            st.error(f"讀取產業輪動資料失敗：{exc}")
+            return
 
     if not rotation_bundle:
         st.caption("目前抓不到足夠的產業輪動資料，可能是最近行情來源暫時不可用。")
