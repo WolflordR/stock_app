@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from textwrap import dedent
+from typing import Any
 
 import pandas as pd
 import streamlit as st
@@ -7,7 +8,7 @@ import streamlit as st
 from modules.core.trading_calendar import resolve_recent_trade_date, resolve_trade_dates_in_range
 from modules.data_sources.broker_branch_data import fetch_broker_branch_summary, fetch_broker_branch_trace
 from modules.data_sources.chip_data import get_institutional_detail_for_stock, get_recent_institutional_snapshots
-from modules.data_sources.broker_branch_short_term import build_short_term_broker_report, format_short_term_summary
+from modules.data_sources.broker_branch_short_term import build_short_term_broker_report, build_today_chip_quick_report, format_short_term_summary
 from modules.data_sources.market_watch import (
     fetch_tpex_after_market_quotes,
     fetch_tpex_daily_quotes,
@@ -16,13 +17,13 @@ from modules.data_sources.market_watch import (
     fetch_twse_daily_quotes,
     fetch_twse_odd_lot_quotes,
 )
-from modules.data_sources.price_cache import fetch_price_history, get_price_cache_status
+from modules.data_sources.price_cache import get_price_cache_status
 from modules.data_sources.stock_db import find_security, get_stock_name
-from modules.ui.ui_backtest_results import render_stock_detail_workspace
+from modules.ui.ui_stock_charts import render_streamlit_lightweight_chart
 
 
-BROKER_BRANCH_CACHE_VERSION = "broker_branch_hybrid_v3"
-TODAY_CHIP_CACHE_VERSION = "today_chip_v4"
+BROKER_BRANCH_CACHE_VERSION = "broker_branch_hybrid_v4"
+TODAY_CHIP_CACHE_VERSION = "today_chip_v12"
 
 
 @st.cache_data(show_spinner=False, ttl=1800)
@@ -36,6 +37,36 @@ def _load_broker_branch_trace(detail_url: str):
 
 
 @st.cache_data(show_spinner=False, ttl=1800)
+def _load_twse_daily_quotes_cached(trade_date_key: str):
+    return fetch_twse_daily_quotes(trade_date_key)
+
+
+@st.cache_data(show_spinner=False, ttl=1800)
+def _load_tpex_daily_quotes_cached(trade_date_key: str):
+    return fetch_tpex_daily_quotes(trade_date_key)
+
+
+@st.cache_data(show_spinner=False, ttl=1800)
+def _load_twse_odd_lot_quotes_cached():
+    return fetch_twse_odd_lot_quotes()
+
+
+@st.cache_data(show_spinner=False, ttl=1800)
+def _load_twse_after_market_quotes_cached():
+    return fetch_twse_after_market_quotes()
+
+
+@st.cache_data(show_spinner=False, ttl=1800)
+def _load_tpex_odd_lot_quotes_cached():
+    return fetch_tpex_odd_lot_quotes()
+
+
+@st.cache_data(show_spinner=False, ttl=1800)
+def _load_tpex_after_market_quotes_cached():
+    return fetch_tpex_after_market_quotes()
+
+
+@st.cache_data(show_spinner=False, ttl=1800)
 def _load_short_term_broker_report(stock_code: str, trade_date_key: str, cache_version: str):
     return build_short_term_broker_report(stock_code)
 
@@ -43,6 +74,34 @@ def _load_short_term_broker_report(stock_code: str, trade_date_key: str, cache_v
 @st.cache_data(show_spinner=False, ttl=1800)
 def _load_short_term_broker_report_window(stock_code: str, days_window: int, trade_date_key: str, cache_version: str):
     return build_short_term_broker_report(stock_code, days_window=days_window)
+
+
+def _build_deferred_today_chip_report(stock_code: str, trade_date_key: str) -> dict[str, Any]:
+    return {
+        "stock_code": stock_code,
+        "stock_title": stock_code,
+        "source_label": "今日籌碼快速模式",
+        "trade_date": trade_date_key,
+        "buy_rows": [],
+        "sell_rows": [],
+        "buy_display_rows": [],
+        "sell_display_rows": [],
+        "summary": {
+            "signal_label": "分點後補",
+            "signal_reason": "為了讓第一屏更快顯示，分點榜與短衝分析改到後面的分頁再載入。",
+            "concentration_lots": None,
+            "main_net_lots": None,
+            "concentration_pct": None,
+            "short_term_buy_pct": None,
+            "short_term_sell_pct": None,
+            "buy_top5_pct": None,
+            "sell_top5_pct": None,
+            "total_volume_lots": None,
+            "estimated_float_pct": None,
+            "interval_turnover_pct": None,
+        },
+        "alerts": [],
+    }
 
 
 def _format_pct_text(value):
@@ -85,6 +144,13 @@ def _format_close_text(value):
     if value is None:
         return "-"
     return f"{float(value):.2f}"
+
+
+def _row_value(row: dict[str, Any], *keys: str):
+    for key in keys:
+        if key in row and row.get(key) is not None:
+            return row.get(key)
+    return None
 
 
 def _format_ratio_text(value):
@@ -155,65 +221,198 @@ def _load_official_volume_lots(stock_code: str, probe_date) -> float | None:
             "after_market_volume",
         )
     else:
-        total_volume_shares += _lookup_component_volume(fetch_tpex_odd_lot_quotes(), stock_code, probe_date, "odd_volume")
-        total_volume_shares += _lookup_component_volume(
-            fetch_tpex_after_market_quotes(),
-            stock_code,
-            probe_date,
-            "after_market_volume",
-        )
+        # TPEx 補零股/盤後端點偏慢，先收斂成只補上市總量，
+        # 上櫃暫時沿用一般盤成交量，避免拖慢個股詳頁第一屏。
+        pass
 
     return total_volume_shares / 1000.0
 
 
-def _load_official_volume_pair(stock_code: str, end_date) -> tuple[float | None, float | None]:
+@st.cache_data(show_spinner=False, ttl=1800)
+def _load_official_snapshot_pair(stock_code: str, end_date_key: str, security_market: str | None) -> dict[str, Any]:
+    end_date = datetime.strptime(end_date_key, "%Y-%m-%d").date()
     resolved_days = resolve_trade_dates_in_range(end_date - timedelta(days=10), end_date)
     if not resolved_days:
-        return None, None
+        return {
+            "current_row": None,
+            "prev_row": None,
+            "current_volume_lots": None,
+            "prev_volume_lots": None,
+        }
 
-    trade_dates = [datetime.strptime(item["effective_date_text"], "%Y-%m-%d").date() for item in resolved_days]
-    if not trade_dates:
-        return None, None
-
+    trade_dates = [item["effective_date_text"] for item in resolved_days]
     current_trade_date = trade_dates[-1]
     prev_trade_date = trade_dates[-2] if len(trade_dates) >= 2 else None
-    current_lots = _load_official_volume_lots(stock_code, current_trade_date)
-    prev_lots = _load_official_volume_lots(stock_code, prev_trade_date) if prev_trade_date else None
-    return current_lots, prev_lots
+
+    quote_cache: dict[str, pd.DataFrame] = {}
+    normalized_market = str(security_market or "").strip().upper()
+
+    def _quote_df_for(trade_date_text: str | None) -> pd.DataFrame:
+        if not trade_date_text:
+            return pd.DataFrame()
+        if trade_date_text not in quote_cache:
+            if normalized_market == "TWSE":
+                quote_cache[trade_date_text] = _load_twse_daily_quotes_cached(trade_date_text)
+            elif normalized_market == "TPEX":
+                quote_cache[trade_date_text] = _load_tpex_daily_quotes_cached(trade_date_text)
+            else:
+                quote_cache[trade_date_text] = pd.concat(
+                    [_load_twse_daily_quotes_cached(trade_date_text), _load_tpex_daily_quotes_cached(trade_date_text)],
+                    ignore_index=True,
+                )
+        return quote_cache[trade_date_text]
+
+    def _lookup_quote_row(trade_date_text: str | None) -> dict[str, Any] | None:
+        quote_df = _quote_df_for(trade_date_text)
+        if quote_df.empty:
+            return None
+        matched = quote_df[quote_df["code"].astype(str) == str(stock_code)]
+        if matched.empty:
+            return None
+        row = matched.iloc[0].to_dict()
+        row["trade_date"] = trade_date_text
+        return row
+
+    twse_odd_df = _load_twse_odd_lot_quotes_cached() if normalized_market in {"", "TWSE"} else pd.DataFrame()
+    twse_after_df = _load_twse_after_market_quotes_cached() if normalized_market in {"", "TWSE"} else pd.DataFrame()
+
+    def _total_volume_lots(row: dict[str, Any] | None, trade_date_text: str | None) -> float | None:
+        if not row or not trade_date_text:
+            return None
+        regular_volume = row.get("volume")
+        if regular_volume is None or pd.isna(regular_volume):
+            return None
+
+        market_name = str(row.get("market") or "")
+        total_volume_shares = float(regular_volume)
+        probe_date = datetime.strptime(trade_date_text, "%Y-%m-%d").date()
+        if market_name == "上市":
+            total_volume_shares += _lookup_component_volume(twse_odd_df, stock_code, probe_date, "odd_volume")
+            total_volume_shares += _lookup_component_volume(twse_after_df, stock_code, probe_date, "after_market_volume")
+        else:
+            # 上櫃先不補零股/盤後，避免 TPEx 盤後大表拖慢第一屏。
+            pass
+        return total_volume_shares / 1000.0
+
+    current_row = _lookup_quote_row(current_trade_date)
+    prev_row = _lookup_quote_row(prev_trade_date)
+    return {
+        "current_row": current_row,
+        "prev_row": prev_row,
+        "current_volume_lots": _total_volume_lots(current_row, current_trade_date),
+        "prev_volume_lots": _total_volume_lots(prev_row, prev_trade_date),
+    }
+
+
+@st.cache_data(show_spinner=False, ttl=1800)
+def _load_basic_quote_pair(stock_code: str, end_date_key: str, security_market: str | None) -> dict[str, Any]:
+    def _to_float(value: Any) -> float | None:
+        try:
+            if value is None or (isinstance(value, float) and pd.isna(value)):
+                return None
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    end_date = datetime.strptime(end_date_key, "%Y-%m-%d").date()
+    resolved_days = resolve_trade_dates_in_range(end_date - timedelta(days=10), end_date)
+    if not resolved_days:
+        return {
+            "current_row": None,
+            "prev_row": None,
+            "current_volume_lots": None,
+            "prev_volume_lots": None,
+        }
+
+    trade_dates = [item["effective_date_text"] for item in resolved_days]
+    normalized_market = str(security_market or "").strip().upper()
+
+    def _quote_df_for(trade_date_text: str | None) -> pd.DataFrame:
+        if not trade_date_text:
+            return pd.DataFrame()
+        if normalized_market == "TWSE":
+            return _load_twse_daily_quotes_cached(trade_date_text)
+        if normalized_market == "TPEX":
+            return _load_tpex_daily_quotes_cached(trade_date_text)
+        return pd.concat(
+            [_load_twse_daily_quotes_cached(trade_date_text), _load_tpex_daily_quotes_cached(trade_date_text)],
+            ignore_index=True,
+        )
+
+    def _lookup_quote_row(trade_date_text: str | None) -> dict[str, Any] | None:
+        quote_df = _quote_df_for(trade_date_text)
+        if quote_df.empty:
+            return None
+        matched = quote_df[quote_df["code"].astype(str) == str(stock_code)]
+        if matched.empty:
+            return None
+        row = matched.iloc[0].to_dict()
+        row["trade_date"] = trade_date_text
+        return row
+
+    resolved_rows = []
+    for trade_date_text in reversed(trade_dates):
+        row = _lookup_quote_row(trade_date_text)
+        if row is not None:
+            resolved_rows.append(row)
+        if len(resolved_rows) >= 2:
+            break
+
+    current_row = resolved_rows[0] if len(resolved_rows) >= 1 else None
+    prev_row = resolved_rows[1] if len(resolved_rows) >= 2 else None
+    return {
+        "current_row": current_row,
+        "prev_row": prev_row,
+        "current_volume_lots": ((_to_float((current_row or {}).get("volume")) or 0.0) / 1000.0) if current_row else None,
+        "prev_volume_lots": ((_to_float((prev_row or {}).get("volume")) or 0.0) / 1000.0) if prev_row else None,
+    }
 
 
 @st.cache_data(show_spinner=False, ttl=1800)
 def _load_today_chip_snapshot(stock_code: str, symbol: str, end_date, cache_version: str):
-    report = build_short_term_broker_report(stock_code, days_window=1)
-    history_df = fetch_price_history(
-        symbol,
-        mode="即時選股",
-        end_date=end_date,
-        history_buffer_days=80,
-        include_indicators=True,
-    )
-    if history_df.empty:
-        return {"short_term_report": report, "history_row": None, "institutional_detail": None, "price_volume_state": None, "volume_ratio_prev_day": None}
+    trade_date_key = _latest_market_date_key(end_date)
+    security = find_security(stock_code) or {}
+    security_market = security.get("market")
 
-    history_df = history_df.copy().sort_index()
-    cutoff_ts = datetime.combine(end_date, datetime.min.time()) if hasattr(end_date, "year") else None
-    if cutoff_ts is not None:
-        history_df = history_df[history_df.index <= cutoff_ts]
-    if history_df.empty:
-        return {"short_term_report": report, "history_row": None, "institutional_detail": None, "price_volume_state": None, "volume_ratio_prev_day": None}
+    report = _build_deferred_today_chip_report(stock_code, trade_date_key)
+    report_error = None
+    report_deferred = True
 
-    latest_row = history_df.iloc[-1].to_dict()
-    latest_row["trade_date"] = history_df.index[-1].strftime("%Y-%m-%d")
-    official_volume_lots, official_prev_volume_lots = _load_official_volume_pair(stock_code, end_date)
-    latest_volume = (official_volume_lots or 0.0) * 1000.0 if official_volume_lots is not None else float(latest_row.get("Volume") or 0.0)
+    # 第一屏優先快開，只吃基本日行情；零股/盤後總量改到後續再補。
+    # 這樣「今日籌碼」不會因為官方補量端點變慢而整塊卡住。
+    quote_warning = None
+    quote_payload = _load_basic_quote_pair(stock_code, trade_date_key, security_market)
+
+    latest_row = quote_payload.get("current_row")
+    prev_row = quote_payload.get("prev_row")
+    if latest_row is None:
+        return {
+            "short_term_report": report,
+            "history_row": None,
+            "institutional_detail": None,
+            "price_volume_state": None,
+            "volume_ratio_prev_day": None,
+            "change_pct": None,
+            "official_volume_lots": None,
+            "official_prev_volume_lots": None,
+            "quote_warning": quote_warning,
+            "report_error": report_error,
+            "report_deferred": report_deferred,
+        }
+
+    official_volume_lots = quote_payload.get("current_volume_lots")
+    official_prev_volume_lots = quote_payload.get("prev_volume_lots")
+    latest_volume = (official_volume_lots or 0.0) * 1000.0 if official_volume_lots is not None else float(latest_row.get("volume") or 0.0)
     prev_day_volume = (official_prev_volume_lots or 0.0) * 1000.0 if official_prev_volume_lots is not None else (
-        float(history_df.iloc[-2]["Volume"]) if len(history_df) >= 2 and history_df.iloc[-2]["Volume"] is not None else None
+        float(prev_row.get("volume")) if prev_row and prev_row.get("volume") is not None else None
     )
     volume_ratio_prev_day = (latest_volume / prev_day_volume) if prev_day_volume and prev_day_volume > 0 else None
 
-    close_value = float(latest_row.get("Close") or 0.0) if latest_row.get("Close") is not None else None
-    prev_close = float(history_df.iloc[-2]["Close"]) if len(history_df) >= 2 and history_df.iloc[-2]["Close"] is not None else None
-    change_pct = ((close_value - prev_close) / prev_close * 100.0) if close_value and prev_close else None
+    close_value = float(latest_row.get("close") or 0.0) if latest_row.get("close") is not None else None
+    prev_close = float(latest_row.get("prev_close") or 0.0) if latest_row.get("prev_close") is not None else None
+    change_pct = float(latest_row.get("change_pct")) if latest_row.get("change_pct") is not None else (
+        ((close_value - prev_close) / prev_close * 100.0) if close_value and prev_close else None
+    )
 
     if (change_pct or 0.0) >= 2.0 and (volume_ratio_prev_day or 0.0) >= 1.5:
         price_volume_state = ("放量上攻", "量價同步擴張，短線追價力道偏強。")
@@ -228,18 +427,59 @@ def _load_today_chip_snapshot(stock_code: str, symbol: str, end_date, cache_vers
     else:
         price_volume_state = ("量價中性", "價格與量能沒有特別偏離常態。")
 
-    security = find_security(stock_code) or {}
-    institutional_detail = get_institutional_detail_for_stock(
-        stock_code,
-        latest_row["trade_date"],
-        market=security.get("market") or "TWSE",
-    )
-    if institutional_detail is None:
+    institutional_detail = None
+    try:
         institutional_detail = get_institutional_detail_for_stock(
             stock_code,
             latest_row["trade_date"],
-            market="TWSE",
+            market=security_market or "TWSE",
         )
+        if institutional_detail is None:
+            institutional_detail = get_institutional_detail_for_stock(
+                stock_code,
+                latest_row["trade_date"],
+                market="TWSE",
+            )
+    except Exception:
+        institutional_detail = None
+
+    try:
+        report = build_today_chip_quick_report(
+            stock_code,
+            trade_date=latest_row.get("trade_date") or trade_date_key,
+            total_volume_lots=official_volume_lots,
+            latest_close_value=close_value,
+        )
+        report_deferred = False
+        report_error = None
+    except Exception as exc:
+        try:
+            report = build_short_term_broker_report(stock_code, days_window=1)
+            report_deferred = False
+            report_error = None
+        except Exception:
+            report = _build_deferred_today_chip_report(stock_code, latest_row.get("trade_date") or trade_date_key)
+            report_error = str(exc)
+            report_deferred = True
+
+    report_summary = report.get("summary") or {}
+    if official_volume_lots is not None:
+        report_summary["total_volume_lots"] = official_volume_lots
+        main_net_lots = report_summary.get("main_net_lots")
+        concentration_lots = report_summary.get("concentration_lots")
+        if main_net_lots is not None and official_volume_lots > 0:
+            report_summary["main_net_pct"] = float(main_net_lots) / float(official_volume_lots) * 100.0
+            report_summary["concentration_pct"] = float(main_net_lots) / float(official_volume_lots) * 100.0
+        if concentration_lots is not None and official_volume_lots > 0:
+            report_summary["concentration_pct"] = float(concentration_lots) / float(official_volume_lots) * 100.0
+        if report_summary.get("short_term_buy_lots") is not None and official_volume_lots > 0:
+            report_summary["short_term_buy_pct"] = float(report_summary["short_term_buy_lots"]) / float(official_volume_lots) * 100.0
+        if report_summary.get("short_term_sell_lots") is not None and official_volume_lots > 0:
+            report_summary["short_term_sell_pct"] = float(report_summary["short_term_sell_lots"]) / float(official_volume_lots) * 100.0
+        if report_summary.get("buy_top5_lots") is not None and official_volume_lots > 0:
+            report_summary["buy_top5_pct"] = float(report_summary["buy_top5_lots"]) / float(official_volume_lots) * 100.0
+        if report_summary.get("sell_top5_lots") is not None and official_volume_lots > 0:
+            report_summary["sell_top5_pct"] = float(report_summary["sell_top5_lots"]) / float(official_volume_lots) * 100.0
 
     return {
         "short_term_report": report,
@@ -250,6 +490,9 @@ def _load_today_chip_snapshot(stock_code: str, symbol: str, end_date, cache_vers
         "change_pct": change_pct,
         "official_volume_lots": official_volume_lots,
         "official_prev_volume_lots": official_prev_volume_lots,
+        "quote_warning": quote_warning,
+        "report_error": report_error,
+        "report_deferred": report_deferred,
     }
 
 
@@ -261,6 +504,38 @@ def _inject_stock_detail_css():
             grid-template-columns: minmax(260px, 0.95fr) minmax(260px, 0.95fr);
             gap: 18px;
             margin: 0.35rem 0 1rem 0;
+        }
+        .stock-today-topline {
+            display:grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 14px;
+            margin: 0.35rem 0 1rem 0;
+        }
+        .stock-today-top-card {
+            border:1px solid rgba(248,250,252,0.12);
+            border-radius: 20px;
+            background: rgba(15,23,42,0.72);
+            padding: 1rem 1.15rem;
+        }
+        .stock-today-top-label {
+            color:#94a3b8;
+            font-size:0.9rem;
+            font-weight:700;
+        }
+        .stock-today-top-value {
+            color:#f8fafc;
+            font-size:2.2rem;
+            font-weight:900;
+            margin-top:0.4rem;
+            line-height:1.05;
+        }
+        .stock-today-top-value.is-bull { color: #fb7185; }
+        .stock-today-top-value.is-bear { color: #22c55e; }
+        .stock-today-top-note {
+            color:#94a3b8;
+            margin-top:0.3rem;
+            font-size:0.88rem;
+            font-weight:700;
         }
         .stock-today-main {
             border:1px solid rgba(248,250,252,0.12);
@@ -512,6 +787,9 @@ def _inject_stock_detail_css():
             margin-top: 0.8rem;
         }
         @media (max-width: 900px) {
+            .stock-today-topline {
+                grid-template-columns: 1fr;
+            }
             .stock-today-hero {
                 grid-template-columns: 1fr;
             }
@@ -555,6 +833,10 @@ def _render_today_chip_section(stock_code: str, symbol: str, end_date):
         st.warning(f"目前抓不到今日籌碼資料：{exc}")
         return
 
+    quote_warning = payload.get("quote_warning")
+    report_error = payload.get("report_error")
+    report_deferred = bool(payload.get("report_deferred"))
+
     report = payload.get("short_term_report") or {}
     summary = report.get("summary") or {}
     summary_text = format_short_term_summary(report)
@@ -573,13 +855,44 @@ def _render_today_chip_section(stock_code: str, symbol: str, end_date):
         state_class = "is-bear"
 
     history_row = payload.get("history_row") or {}
-    close_text = _format_close_text(history_row.get("Close"))
+    close_text = _format_close_text(_row_value(history_row, "close", "Close"))
     change_pct_text = _format_pct_text(payload.get("change_pct"))
     display_volume_lots = payload.get("official_volume_lots")
     if display_volume_lots is None:
-        display_volume_lots = (history_row.get("Volume") or 0.0) / 1000.0 if history_row.get("Volume") is not None else None
+        fallback_volume = _row_value(history_row, "volume", "Volume")
+        display_volume_lots = (fallback_volume or 0.0) / 1000.0 if fallback_volume is not None else None
     volume_text = _format_lots_text(display_volume_lots)
+    summary_text["成交量"] = volume_text
     volume_growth_text = _format_ratio_text(payload.get("volume_ratio_prev_day"))
+    top_close_class = "is-neutral"
+    change_pct_value = payload.get("change_pct")
+    if change_pct_value is not None:
+        if change_pct_value > 0:
+            top_close_class = "is-bull"
+        elif change_pct_value < 0:
+            top_close_class = "is-bear"
+    top_line_html = dedent(
+        f"""
+        <div class="stock-today-topline">
+            <div class="stock-today-top-card">
+                <div class="stock-today-top-label">收盤價</div>
+                <div class="stock-today-top-value {top_close_class}">{close_text}</div>
+                <div class="stock-today-top-note">資料日 {history_row.get("trade_date") or report.get("trade_date") or '-'}</div>
+            </div>
+            <div class="stock-today-top-card">
+                <div class="stock-today-top-label">漲跌幅</div>
+                <div class="stock-today-top-value {top_close_class}">{change_pct_text}</div>
+                <div class="stock-today-top-note">相對前一交易日</div>
+            </div>
+            <div class="stock-today-top-card">
+                <div class="stock-today-top-label">成交量</div>
+                <div class="stock-today-top-value">{volume_text}</div>
+                <div class="stock-today-top-note">量增幅 {volume_growth_text}</div>
+            </div>
+        </div>
+        """
+    ).strip()
+    st.html(top_line_html)
     hero_html = dedent(
         f"""
         <div class="stock-today-hero">
@@ -655,6 +968,13 @@ def _render_today_chip_section(stock_code: str, symbol: str, end_date):
         """
     ).strip()
     st.html(today_grid_html)
+
+    if quote_warning:
+        st.info(f"今日總量補值逾時，先用一般盤日行情顯示：{quote_warning}")
+    if report_deferred:
+        st.caption("第一屏先顯示價量與法人摘要；分點榜與短衝分析會在後面的分頁再載入。")
+    if report_error:
+        st.warning(f"分點資料暫時退回簡化模式：{report_error}")
 
     institutional = payload.get("institutional_detail") or {}
     institution_cols = st.columns(4)
@@ -782,6 +1102,7 @@ def _render_short_term_broker_section(stock_code: str):
         meta_cols[3].metric("來源", report.get("source_label") or "官方匯入資料")
     source_label = report.get("source_label") or "分點榜來源"
     st.caption(f"目前分點來源：{source_label}")
+    is_yahoo_fallback = "Yahoo" in source_label
 
     buy_rows = report.get("buy_rows") or []
     sell_rows = report.get("sell_rows") or []
@@ -796,11 +1117,11 @@ def _render_short_term_broker_section(stock_code: str):
                 tag_pieces.append(f"近{report.get('days_window') or 1}日活躍 {int(row['active_days'])} 天")
             tag_line = " / ".join(tag_pieces) if tag_pieces else "一般分點"
             right_lines = []
-            if row.get("avg_price_value") is not None:
+            if not is_yahoo_fallback and row.get("avg_price_value") is not None:
                 right_lines.append(
                     f'<div class="stock-short-term-rank-price">均價 {_format_price_text(row.get("avg_price_value"))}</div>'
                 )
-            if row.get("total_profit_k_value") is not None:
+            if not is_yahoo_fallback and row.get("total_profit_k_value") is not None:
                 right_lines.append(
                     f'<div class="stock-short-term-rank-profit {variant}">損益 {_format_profit_k_text(row.get("total_profit_k_value"))} 萬</div>'
                 )
@@ -952,11 +1273,17 @@ def render_stock_detail_page(state):
         )
 
     stock_code = display_code
-    tab_today, tab_chart, tab_short_term, tab_branch = st.tabs(["今日籌碼", "技術線圖", "短衝主力", "分點明細"])
+    selected_section = st.segmented_control(
+        "個股詳頁分頁",
+        options=["今日籌碼", "技術線圖", "短衝主力", "分點明細"],
+        default="今日籌碼",
+        key="stock_detail_section",
+        label_visibility="collapsed",
+    )
 
-    with tab_today:
+    if selected_section == "今日籌碼":
         _render_today_chip_section(stock_code, symbol, default_end)
-    with tab_chart:
+    elif selected_section == "技術線圖":
         chart_cols = st.columns(2)
         start_date = chart_cols[0].date_input(
             "開始日",
@@ -968,19 +1295,35 @@ def render_stock_detail_page(state):
             value=default_end,
             key="stock_detail_end_date",
         )
+        with st.expander("圖表指標", expanded=False):
+            indicator_cols = st.columns(2)
+            visible_price_indicators = indicator_cols[0].multiselect(
+                "價格指標",
+                options=["MA5", "MA10", "MA20", "MA60", "MA120"],
+                default=["MA5", "MA10", "MA20", "MA60"],
+                key="stock_detail_price_indicators",
+            )
+            visible_volume_indicators = indicator_cols[1].multiselect(
+                "量能指標",
+                options=["MV5", "MV20"],
+                default=["MV5", "MV20"],
+                key="stock_detail_volume_indicators",
+            )
         if start_date > end_date:
             st.error("開始日不能晚於結束日。")
         else:
-            render_stock_detail_workspace(
+            render_streamlit_lightweight_chart(
                 symbol,
                 stock_title,
                 start_date=start_date,
                 end_date=end_date,
                 key_prefix="stock_detail_workspace",
+                stock_code=stock_code,
+                market_label=market_text,
+                visible_price_indicators=visible_price_indicators,
+                visible_volume_indicators=visible_volume_indicators,
             )
-
-    if stock_code:
-        with tab_short_term:
-            _render_short_term_broker_section(stock_code)
-        with tab_branch:
-            _render_broker_branch_section(stock_code)
+    elif stock_code and selected_section == "短衝主力":
+        _render_short_term_broker_section(stock_code)
+    elif stock_code and selected_section == "分點明細":
+        _render_broker_branch_section(stock_code)
