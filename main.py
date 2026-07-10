@@ -14,43 +14,20 @@ from modules.core.internal_nav import sync_selected_view_query
 from modules.ui.ui_dialogs import render_buy_strategy_dialog, render_sell_strategy_dialog
 from modules.ui.ui_sidebar import render_sidebar
 from modules.ui.ui_state import ensure_strategy_state, initialize_session_state, load_secret_env
+from modules.ui.ui_theme import inject_app_background_css
 
 
 st.set_option("client.showSidebarNavigation", False)
 st.set_page_config(page_title="台股量化回測系統", layout="wide")
-st.markdown(
-    """
-    <style>
-    .block-container {
-        padding-top: 1.1rem;
-        padding-bottom: 2rem;
-    }
-    .app-badge {
-        font-size: 0.92rem;
-        font-weight: 700;
-        letter-spacing: 0.02em;
-        color: #0f172a;
-        margin-bottom: 0.15rem;
-    }
-    .app-subtitle {
-        font-size: 0.8rem;
-        color: #64748b;
-        margin-bottom: 0.9rem;
-    }
-    div[data-testid="stSidebar"] {
-        border-right: 1px solid rgba(100, 116, 139, 0.12);
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-st.markdown('<div class="app-badge">Trade Lab</div>', unsafe_allow_html=True)
-st.markdown('<div class="app-subtitle">台股回測、選股與籌碼觀察工作台</div>', unsafe_allow_html=True)
 
 load_secret_env("OPENAI_API_KEY")
 load_secret_env("OPENAI_NEWS_MODEL")
 initialize_session_state()
 ensure_strategy_state()
+inject_app_background_css()
+
+st.markdown('<div class="app-badge">Trade Lab</div>', unsafe_allow_html=True)
+st.markdown('<div class="app-subtitle">台股回測、選股與籌碼觀察工作台</div>', unsafe_allow_html=True)
 
 query_params = st.query_params
 query_selected_view = query_params.get("selected_view")
