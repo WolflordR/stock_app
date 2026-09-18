@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import ssl
+import time
 import urllib.request
+from urllib.error import HTTPError, URLError
 
 
 DEFAULT_HEADERS = {
@@ -17,21 +19,50 @@ def _build_insecure_ssl_context():
     return insecure_context
 
 
-def request_bytes(url, *, headers=None, timeout=30, allow_insecure_fallback=True):
+RETRYABLE_ERROR_TYPES = (URLError, TimeoutError, ssl.SSLError)
+
+
+def request_bytes(
+    url,
+    *,
+    headers=None,
+    timeout=30,
+    allow_insecure_fallback=True,
+    retries=2,
+    retry_delay_sec=0.35,
+):
     merged_headers = DEFAULT_HEADERS | (headers or {})
     request = urllib.request.Request(url, headers=merged_headers)
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            return response.read()
-    except Exception:
-        if not allow_insecure_fallback:
+    last_error = None
+
+    for attempt in range(max(1, int(retries) + 1)):
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                return response.read()
+        except HTTPError:
             raise
-        with urllib.request.urlopen(
-            request,
-            timeout=timeout,
-            context=_build_insecure_ssl_context(),
-        ) as response:
-            return response.read()
+        except RETRYABLE_ERROR_TYPES as exc:
+            last_error = exc
+            if allow_insecure_fallback:
+                try:
+                    with urllib.request.urlopen(
+                        request,
+                        timeout=timeout,
+                        context=_build_insecure_ssl_context(),
+                    ) as response:
+                        return response.read()
+                except HTTPError:
+                    raise
+                except RETRYABLE_ERROR_TYPES as fallback_exc:
+                    last_error = fallback_exc
+
+            if attempt >= int(retries):
+                break
+            time.sleep(max(0.0, float(retry_delay_sec)) * (attempt + 1))
+
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError(f"request_bytes failed without an exception for {url}")
 
 
 def request_text(
@@ -42,12 +73,16 @@ def request_text(
     encoding="utf-8",
     errors="replace",
     allow_insecure_fallback=True,
+    retries=2,
+    retry_delay_sec=0.35,
 ):
     raw = request_bytes(
         url,
         headers=headers,
         timeout=timeout,
         allow_insecure_fallback=allow_insecure_fallback,
+        retries=retries,
+        retry_delay_sec=retry_delay_sec,
     )
     return raw.decode(encoding, errors=errors)
 
@@ -60,6 +95,8 @@ def request_json(
     encoding="utf-8",
     errors="replace",
     allow_insecure_fallback=True,
+    retries=2,
+    retry_delay_sec=0.35,
 ):
     return json.loads(
         request_text(
@@ -69,5 +106,7 @@ def request_json(
             encoding=encoding,
             errors=errors,
             allow_insecure_fallback=allow_insecure_fallback,
+            retries=retries,
+            retry_delay_sec=retry_delay_sec,
         )
     )

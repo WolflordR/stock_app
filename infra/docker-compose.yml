@@ -1,0 +1,54 @@
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    environment:
+      TRADE_DATA_DIR: /trade/data
+      TRADE_DB_DIR: /trade/data/db
+      TRADE_RAW_DATA_DIR: /trade/data/raw
+      TRADE_PROCESSED_DATA_DIR: /trade/data/processed
+      TRADE_CACHE_DIR: /trade/data/cache
+      TRADE_LOGS_DIR: /trade/logs
+      TRADE_BACKUPS_DIR: /trade/backups
+      TRADE_API_CORS_ORIGINS: ${TRADE_API_CORS_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080}
+    volumes:
+      - ${TRADE_NAS_ROOT:-/volume1/trade}/data:/trade/data
+      - ${TRADE_NAS_ROOT:-/volume1/trade}/logs:/trade/logs
+      - ${TRADE_NAS_ROOT:-/volume1/trade}/backups:/trade/backups
+    ports:
+      - "${TRADE_API_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  web:
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+    depends_on:
+      - api
+    ports:
+      - "${TRADE_WEB_PORT:-8080}:80"
+
+  worker:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    command: ["python", "-m", "apps.worker.check_paths"]
+    environment:
+      TRADE_DATA_DIR: /trade/data
+      TRADE_DB_DIR: /trade/data/db
+      TRADE_RAW_DATA_DIR: /trade/data/raw
+      TRADE_PROCESSED_DATA_DIR: /trade/data/processed
+      TRADE_CACHE_DIR: /trade/data/cache
+      TRADE_LOGS_DIR: /trade/logs
+      TRADE_BACKUPS_DIR: /trade/backups
+    volumes:
+      - ${TRADE_NAS_ROOT:-/volume1/trade}/data:/trade/data
+      - ${TRADE_NAS_ROOT:-/volume1/trade}/logs:/trade/logs
+      - ${TRADE_NAS_ROOT:-/volume1/trade}/backups:/trade/backups
+    profiles:
+      - tools

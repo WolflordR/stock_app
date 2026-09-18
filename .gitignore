@@ -12,7 +12,19 @@ data/revenue_cache.db
 data/chip_cache.db
 data/active_etf_history.db
 data/broker_daily_trades.db
+data/api_jobs.db
+data/raw/
+logs/
+backups/
+.env.local
 *.db-wal
 *.db-shm
 
 .streamlit/secrets.toml
+.env.nas
+
+node_modules/
+dist/
+apps/web/node_modules/
+apps/web/dist/
+ddddorc_try/

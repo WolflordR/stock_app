@@ -16,6 +16,7 @@ def _request_text(url):
         headers={
             "Accept": "application/json,text/plain,*/*",
         },
+        timeout=8,
         encoding="utf-8",
     )
 
@@ -141,7 +142,10 @@ def fetch_twse_daily_quotes(trade_date):
         payload = None
 
     if not payload:
-        latest_df = _fetch_twse_latest_quotes_from_openapi()
+        try:
+            latest_df = _fetch_twse_latest_quotes_from_openapi()
+        except Exception:
+            latest_df = pd.DataFrame()
         requested_date = _to_date(trade_date).strftime("%Y-%m-%d")
         if latest_df.empty or latest_df.attrs.get("source_date") != requested_date:
             return pd.DataFrame()
@@ -321,6 +325,42 @@ def fetch_tpex_after_market_quotes():
             "after_market_volume": source_df["TradeVolume"].map(_clean_number),
         }
     )
+
+
+def fetch_twse_day_trading_series(stock_code):
+    code = str(stock_code or "").strip()
+    if not code or not code.isdigit():
+        return pd.DataFrame(columns=["date", "day_trade_volume", "total_volume", "day_trade_ratio", "avg_day_trade_volume"])
+
+    payload = _request_json(
+        "https://www.twse.com.tw/rwd/zh/IIH/company/dayTrading?"
+        + urllib.parse.urlencode({"code": code})
+    )
+    chart = payload.get("chart") or {}
+    categories = chart.get("categories") or []
+    series = chart.get("series") or []
+    pct_values = chart.get("pct") or []
+    avg_value = _clean_number(chart.get("avg"))
+    if not categories or len(series) < 2:
+        return pd.DataFrame(columns=["date", "day_trade_volume", "total_volume", "day_trade_ratio", "avg_day_trade_volume"])
+
+    day_trade_values = series[0].get("data") or []
+    total_values = series[1].get("data") or []
+
+    rows = []
+    for idx, raw_date in enumerate(categories):
+        date_text = str(raw_date).replace("/", "-")
+        rows.append(
+            {
+                "date": date_text,
+                "day_trade_volume": _clean_number(day_trade_values[idx]) if idx < len(day_trade_values) else None,
+                "total_volume": _clean_number(total_values[idx]) if idx < len(total_values) else None,
+                "day_trade_ratio": _clean_number(pct_values[idx]) if idx < len(pct_values) else None,
+                "avg_day_trade_volume": avg_value,
+            }
+        )
+
+    return pd.DataFrame(rows)
 
 
 def _find_recent_quotes(anchor_date, max_lookback_days=7):

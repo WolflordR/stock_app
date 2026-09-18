@@ -4,10 +4,10 @@ import pickle
 import sqlite3
 import time
 
-from modules.core.project_paths import data_path
+from modules.core.project_paths import db_path
 
 
-CACHE_DB_PATH = data_path("ui_persistent_cache.db")
+CACHE_DB_PATH = db_path("ui_persistent_cache.db")
 
 
 def _get_connection():

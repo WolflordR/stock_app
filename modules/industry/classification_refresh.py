@@ -7,14 +7,14 @@ from datetime import datetime
 
 import pandas as pd
 
-from modules.core.project_paths import data_path
+from modules.core.project_paths import data_path, db_path
 from modules.industry.industry_taxonomy import THEME_DEFINITIONS
 from modules.industry.industry_taxonomy import THEME_DEFINITIONS_VERSION
 from modules.data_sources.revenue_data import get_latest_monthly_revenue
 from modules.data_sources.stock_db import DB_PATH as STOCK_DB_PATH
 from modules.data_sources.stock_db import ensure_stock_db
 
-DB_PATH = data_path("company_links.db")
+DB_PATH = db_path("company_links.db")
 THEME_OVERRIDE_PATH = data_path("industry_theme_overrides.csv")
 
 ENGLISH_ALIAS_OVERRIDES = {

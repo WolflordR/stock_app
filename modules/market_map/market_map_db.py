@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 
 import pandas as pd
 
-from modules.core.project_paths import data_path
+from modules.core.project_paths import data_path, db_path
 from modules.industry.classification_refresh import ENGLISH_ALIAS_OVERRIDES
 from modules.industry.industry_taxonomy import THEME_DEFINITIONS
 from modules.market_map.market_map_taxonomy import GROUP_DEFINITIONS
@@ -20,7 +20,7 @@ from modules.data_sources.stock_db import DB_PATH as STOCK_DB_PATH
 from modules.data_sources.stock_db import ensure_stock_db
 
 
-DB_PATH = data_path("market_map.db")
+DB_PATH = db_path("market_map.db")
 THEME_OVERRIDE_PATH = data_path("industry_theme_overrides.csv")
 TAIWAN_MARKETS = {"TWSE", "TPEx"}
 REGION_SCOPE = "TW_ONLY"

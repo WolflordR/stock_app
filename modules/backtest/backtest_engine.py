@@ -1,21 +1,142 @@
+import logging
 import time
+from functools import lru_cache
 
-from modules.backtest.bowl_scoring import analyze_bowl_bottom_candidate
 from modules.backtest.performance_metrics import build_equity_curve, build_performance_summary
+from modules.backtest.signals.registry import evaluate_registered_buy_strategies
+from modules.backtest.signals.sell_registry import evaluate_registered_sell_strategies
+from modules.core.trading_calendar import resolve_after_hours_trade_date, resolve_recent_trade_date
+from modules.data_sources.market_watch import fetch_tpex_daily_quotes, fetch_twse_daily_quotes
 from modules.data_sources.price_cache import fetch_price_history
-from modules.data_sources.stock_db import ensure_stock_db, get_securities_in_range, get_stock_name
-from modules.backtest.strategy_signals import (
-    analyze_vcp_candidate,
-    calculate_relative_strength_spread,
-    evaluate_buy_signal,
-    get_history_buffer_days,
-    strategy_break_support,
-    strategy_death_cross,
-)
+from modules.data_sources.stock_db import ensure_stock_db, get_securities_in_range, get_security_share_profile, get_stock_name
+from modules.industry.company_links_db import get_company_profiles_df
+from modules.industry.industry_taxonomy import TECH_INDUSTRY_NAMES
+from modules.backtest.strategy_signals import get_history_buffer_days
+
+
+logger = logging.getLogger(__name__)
 
 
 def get_chinese_name(stock_id):
     return get_stock_name(stock_id)
+
+
+@lru_cache(maxsize=1)
+def _load_tech_stock_symbol_set():
+    profiles_df = get_company_profiles_df()
+    if profiles_df.empty:
+        return set()
+
+    tech_industries = set(TECH_INDUSTRY_NAMES)
+    tech_df = profiles_df[profiles_df["industry"].fillna("").astype(str).str.strip().isin(tech_industries)].copy()
+    symbols = set(tech_df["yfinance_symbol"].fillna("").astype(str).str.strip())
+    codes = set(tech_df["code"].fillna("").astype(str).str.zfill(4))
+    return {value for value in symbols | codes if value}
+
+
+def _is_tech_stock(stock_id):
+    normalized = str(stock_id or "").strip().upper()
+    if not normalized:
+        return False
+    code = normalized.split(".")[0]
+    tech_lookup = _load_tech_stock_symbol_set()
+    return normalized in tech_lookup or code in tech_lookup
+
+
+def _resolve_scan_trade_date_text(mode="即時選股", end_date=None):
+    if end_date:
+        return resolve_recent_trade_date(end_date)["effective_date_text"]
+    if mode == "即時選股":
+        return resolve_after_hours_trade_date()["effective_date_text"]
+    return resolve_recent_trade_date(None)["effective_date_text"]
+
+
+@lru_cache(maxsize=16)
+def _load_market_cap_leader_symbol_set(trade_date_text, rank_limit=50):
+    rank_limit = max(1, int(rank_limit))
+    twse_df = fetch_twse_daily_quotes(trade_date_text)
+    tpex_df = fetch_tpex_daily_quotes(trade_date_text)
+    quote_df = None
+    if not twse_df.empty and not tpex_df.empty:
+        import pandas as pd
+
+        quote_df = pd.concat([twse_df, tpex_df], ignore_index=True)
+    elif not twse_df.empty:
+        quote_df = twse_df.copy()
+    elif not tpex_df.empty:
+        quote_df = tpex_df.copy()
+    else:
+        quote_df = None
+
+    if quote_df is None or quote_df.empty:
+        return frozenset()
+
+    market_caps = []
+    for row in quote_df.itertuples(index=False):
+        code = str(getattr(row, "code", "") or "").strip()
+        if not code:
+            continue
+        close_value = getattr(row, "close", None)
+        try:
+            close_price = float(close_value)
+        except (TypeError, ValueError):
+            continue
+        if close_price <= 0:
+            continue
+
+        symbol = str(getattr(row, "symbol", "") or "").strip().upper()
+        market = str(getattr(row, "market", "") or "").strip().upper()
+        stock_input = symbol or code
+        share_profile = get_security_share_profile(stock_input)
+        issued_common_shares = (share_profile or {}).get("issued_common_shares")
+        try:
+            shares = float(issued_common_shares)
+        except (TypeError, ValueError):
+            continue
+        if shares <= 0:
+            continue
+        effective_symbol = symbol or (f"{code}.TW" if market == "TWSE" else f"{code}.TWO")
+        market_caps.append((close_price * shares, code, effective_symbol))
+
+    market_caps.sort(key=lambda item: item[0], reverse=True)
+    leaders = set()
+    for _, code, symbol in market_caps[:rank_limit]:
+        leaders.add(code)
+        leaders.add(symbol.upper())
+    return frozenset(leaders)
+
+
+def _build_trade_record(*, buy_date, buy_price, sell_date, sell_price, trading_cost_pct, reason, active_setup):
+    gross_return_pct = (sell_price - buy_price) / buy_price * 100
+    net_return_pct = gross_return_pct - trading_cost_pct
+    return {
+        "buy_date": buy_date,
+        "buy_price": buy_price,
+        "sell_date": sell_date,
+        "sell_price": sell_price,
+        "gross_return_pct": gross_return_pct,
+        "cost_pct": trading_cost_pct,
+        "return_pct": net_return_pct,
+        "reason": reason,
+        "buy_rs_spread_pct": active_setup.get("rs_spread_pct"),
+        "w_support_price": active_setup.get("support_price"),
+        "w_stop_price": active_setup.get("stop_price"),
+        "w_target_price": active_setup.get("target_price"),
+        "gap_support_price": active_setup.get("gap_support_price"),
+        "gap_stop_price": active_setup.get("gap_stop_price"),
+        "gap_day": active_setup.get("gap_day"),
+        "gap_shadow_day": active_setup.get("shadow_confirm_day"),
+        "pullback_score": active_setup.get("pullback_score"),
+        "pullback_depth_pct": active_setup.get("pullback_depth_pct"),
+        "pullback_reference_high": active_setup.get("pullback_reference_high"),
+        "pullback_guard_low": active_setup.get("pullback_guard_low"),
+        "pullback_prior_close": active_setup.get("pullback_prior_close"),
+        "pullback_latest_close": active_setup.get("pullback_latest_close"),
+        "high_price_pullback_score": active_setup.get("high_price_pullback_score"),
+        "high_price_pullback_depth_pct": active_setup.get("high_price_pullback_depth_pct"),
+        "high_price_pullback_reference_high": active_setup.get("high_price_pullback_reference_high"),
+        "high_price_pullback_latest_close": active_setup.get("high_price_pullback_latest_close"),
+    }
 
 
 def check_stock(
@@ -57,10 +178,22 @@ def check_stock(
     vcp_breakout_volume_ratio=1.5,
     vcp_near_pivot_tolerance_pct=3.0,
     vcp_max_consolidation_depth_pct=25.0,
+    pullback_strong_lookback_days=20,
+    pullback_min_pullback_pct=10.0,
+    pullback_base_hold_days=3,
+    pullback_low_price_volume_price_threshold=500.0,
+    pullback_low_price_min_volume_lots=700.0,
+    pullback_technology_only=True,
+    high_price_pullback_lookback_days=20,
+    high_price_pullback_market_cap_rank_limit=50,
+    high_price_pullback_min_drop_pct=15.0,
+    high_price_pullback_eligible_symbol_set=None,
     history_buffer_days=120,
 ):
     try:
         selected_sell_strategies = selected_sell_strategies or []
+        if "強勢股回檔量縮止跌" in selected_strategies and pullback_technology_only and not _is_tech_stock(stock_id):
+            return None
         df = fetch_price_history(
             stock_id,
             mode,
@@ -73,6 +206,45 @@ def check_stock(
         df = df.sort_index()
         if getattr(df.index, "tz", None) is not None:
             df.index = df.index.tz_localize(None)
+
+        buy_strategy_params = {
+            "range_lookback_days": range_lookback_days,
+            "range_max_width_pct": range_max_width_pct,
+            "range_volume_ratio": range_volume_ratio,
+            "range_min_price_gain_pct": range_min_price_gain_pct,
+            "range_max_price_gain_pct": range_max_price_gain_pct,
+            "range_volume_sustain_days": range_volume_sustain_days,
+            "w_bottom_lookback_days": w_bottom_lookback_days,
+            "w_bottom_tolerance_pct": w_bottom_tolerance_pct,
+            "w_bottom_min_rebound_pct": w_bottom_min_rebound_pct,
+            "w_bottom_lower_shadow_ratio": w_bottom_lower_shadow_ratio,
+            "w_bottom_stop_buffer_pct": w_bottom_stop_buffer_pct,
+            "gap_channel_lookback_days": gap_channel_lookback_days,
+            "gap_channel_max_width_pct": gap_channel_max_width_pct,
+            "gap_lookback_days": gap_lookback_days,
+            "gap_min_gap_pct": gap_min_gap_pct,
+            "gap_hold_tolerance_pct": gap_hold_tolerance_pct,
+            "gap_lower_shadow_lookback_days": gap_lower_shadow_lookback_days,
+            "gap_lower_shadow_ratio": gap_lower_shadow_ratio,
+            "gap_stop_buffer_pct": gap_stop_buffer_pct,
+            "rs_lookback_days": rs_lookback_days,
+            "rs_min_outperformance_pct": rs_min_outperformance_pct,
+            "vcp_lookback_days": vcp_lookback_days,
+            "vcp_min_uptrend_pct": vcp_min_uptrend_pct,
+            "vcp_breakout_volume_ratio": vcp_breakout_volume_ratio,
+            "vcp_near_pivot_tolerance_pct": vcp_near_pivot_tolerance_pct,
+            "vcp_max_consolidation_depth_pct": vcp_max_consolidation_depth_pct,
+            "pullback_strong_lookback_days": pullback_strong_lookback_days,
+            "pullback_min_pullback_pct": pullback_min_pullback_pct,
+            "pullback_base_hold_days": pullback_base_hold_days,
+            "pullback_low_price_volume_price_threshold": pullback_low_price_volume_price_threshold,
+            "pullback_low_price_min_volume_lots": pullback_low_price_min_volume_lots,
+            "high_price_pullback_lookback_days": high_price_pullback_lookback_days,
+            "high_price_pullback_market_cap_rank_limit": high_price_pullback_market_cap_rank_limit,
+            "high_price_pullback_min_drop_pct": high_price_pullback_min_drop_pct,
+            "high_price_pullback_eligible_symbol_set": high_price_pullback_eligible_symbol_set or set(),
+            "stock_id": stock_id,
+        }
 
         if mode == "歷史回測":
             trades = []
@@ -93,36 +265,11 @@ def check_stock(
                 current_row = df.iloc[i]
 
                 if not in_position:
-                    matched, buy_setup = evaluate_buy_signal(
+                    matched, buy_setup = evaluate_registered_buy_strategies(
                         current_slice,
                         selected_strategies,
-                        benchmark_df.loc[: current_slice.index[-1]] if benchmark_df is not None else None,
-                        range_lookback_days,
-                        range_max_width_pct,
-                        range_volume_ratio,
-                        range_min_price_gain_pct,
-                        range_max_price_gain_pct,
-                        range_volume_sustain_days,
-                        w_bottom_lookback_days,
-                        w_bottom_tolerance_pct,
-                        w_bottom_min_rebound_pct,
-                        w_bottom_lower_shadow_ratio,
-                        w_bottom_stop_buffer_pct,
-                        gap_channel_lookback_days,
-                        gap_channel_max_width_pct,
-                        gap_lookback_days,
-                        gap_min_gap_pct,
-                        gap_hold_tolerance_pct,
-                        gap_lower_shadow_lookback_days,
-                        gap_lower_shadow_ratio,
-                        gap_stop_buffer_pct,
-                        rs_lookback_days,
-                        rs_min_outperformance_pct,
-                        vcp_lookback_days,
-                        vcp_min_uptrend_pct,
-                        vcp_breakout_volume_ratio,
-                        vcp_near_pivot_tolerance_pct,
-                        vcp_max_consolidation_depth_pct,
+                        benchmark_df=benchmark_df.loc[: current_slice.index[-1]] if benchmark_df is not None else None,
+                        params=buy_strategy_params,
                     )
                     if matched:
                         in_position = True
@@ -136,100 +283,37 @@ def check_stock(
                     if current_row["High"] > max_high:
                         max_high = current_row["High"]
 
-                    sell_price = 0
-                    sell_reason = ""
-                    sold = False
-
-                    if not sold and "W底結構停損" in selected_sell_strategies and active_setup.get("stop_price"):
-                        if current_row["Low"] <= active_setup["stop_price"]:
-                            sell_price = active_setup["stop_price"]
-                            sell_reason = f"W底結構停損(-{w_bottom_stop_buffer_pct:.1f}%)"
-                            sold = True
-
-                    if not sold and "缺口支撐停損" in selected_sell_strategies and active_setup.get("gap_stop_price"):
-                        if current_row["Low"] <= active_setup["gap_stop_price"]:
-                            sell_price = active_setup["gap_stop_price"]
-                            sell_reason = f"缺口支撐停損(-{gap_stop_buffer_pct:.1f}%)"
-                            sold = True
-
-                    if not sold and "W底目標到價" in selected_sell_strategies and active_setup.get("target_price"):
-                        if current_row["High"] >= active_setup["target_price"]:
-                            sell_price = active_setup["target_price"]
-                            sell_reason = "W底目標到價"
-                            sold = True
-
-                    if not sold and "初始停損" in selected_sell_strategies:
-                        initial_stop_price = buy_price * (1 - initial_stop_loss_pct / 100)
-                        if current_row["Low"] <= initial_stop_price:
-                            sell_price = initial_stop_price
-                            sell_reason = f"初始停損(-{initial_stop_loss_pct:.1f}%)"
-                            sold = True
-
-                    if not sold and "移動式停損" in selected_sell_strategies:
-                        curr_profit_pct = (max_high - buy_price) / buy_price * 100
-                        stop_loss_price = max_high * (1 - trailing_stop_drawdown_pct / 100)
-                        if curr_profit_pct >= trailing_stop_activation_pct and current_row["Close"] <= stop_loss_price:
-                            sell_price = current_row["Close"]
-                            sell_reason = (
-                                f"移動停損(獲利達{trailing_stop_activation_pct:.1f}%後，"
-                                f"收盤跌破高點回撤{trailing_stop_drawdown_pct:.1f}%)"
-                            )
-                            sold = True
-
-                    if not sold and "停利 10% / 停損 5%" in selected_sell_strategies:
-                        if current_row["High"] >= buy_price * 1.10:
-                            sell_price = buy_price * 1.10
-                            sell_reason = "固定停利(+10%)"
-                            sold = True
-                        elif current_row["Low"] <= buy_price * 0.95:
-                            sell_price = buy_price * 0.95
-                            sell_reason = "固定停損(-5%)"
-                            sold = True
-
-                    if not sold and "跌破 5 日均線" in selected_sell_strategies:
-                        ma5 = current_slice["Close"].rolling(window=5).mean().iloc[-1]
-                        if current_row["Close"] < ma5:
-                            sell_price = current_row["Close"]
-                            sell_reason = "跌破 5MA"
-                            sold = True
-
-                    if not sold and "死亡交叉策略" in selected_sell_strategies and strategy_death_cross(current_slice):
-                        sell_price = current_row["Close"]
-                        sell_reason = "死亡交叉"
-                        sold = True
-
-                    if not sold and "跌破近10日支撐" in selected_sell_strategies and strategy_break_support(current_slice, lookback_days=10):
-                        sell_price = current_row["Close"]
-                        sell_reason = "跌破近10日支撐"
-                        sold = True
-
-                    if not sold and "持有 5 個交易日" in selected_sell_strategies and days_held >= 5:
-                        sell_price = current_row["Close"]
-                        sell_reason = "天數到期"
-                        sold = True
+                    sold, sell_price, sell_reason = evaluate_registered_sell_strategies(
+                        current_slice,
+                        current_row,
+                        selected_sell_strategies,
+                        position={
+                            "buy_price": buy_price,
+                            "buy_date": buy_date,
+                            "days_held": days_held,
+                            "max_high": max_high,
+                            "active_setup": active_setup,
+                        },
+                        params={
+                            "initial_stop_loss_pct": initial_stop_loss_pct,
+                            "w_bottom_stop_buffer_pct": w_bottom_stop_buffer_pct,
+                            "gap_stop_buffer_pct": gap_stop_buffer_pct,
+                            "trailing_stop_activation_pct": trailing_stop_activation_pct,
+                            "trailing_stop_drawdown_pct": trailing_stop_drawdown_pct,
+                        },
+                    )
 
                     if sold:
-                        gross_return_pct = (sell_price - buy_price) / buy_price * 100
-                        net_return_pct = gross_return_pct - trading_cost_pct
                         trades.append(
-                            {
-                                "buy_date": buy_date,
-                                "buy_price": buy_price,
-                                "sell_date": current_date,
-                                "sell_price": sell_price,
-                                "gross_return_pct": gross_return_pct,
-                                "cost_pct": trading_cost_pct,
-                                "return_pct": net_return_pct,
-                                "reason": sell_reason,
-                                "buy_rs_spread_pct": active_setup.get("rs_spread_pct"),
-                                "w_support_price": active_setup.get("support_price"),
-                                "w_stop_price": active_setup.get("stop_price"),
-                                "w_target_price": active_setup.get("target_price"),
-                                "gap_support_price": active_setup.get("gap_support_price"),
-                                "gap_stop_price": active_setup.get("gap_stop_price"),
-                                "gap_day": active_setup.get("gap_day"),
-                                "gap_shadow_day": active_setup.get("shadow_confirm_day"),
-                            }
+                            _build_trade_record(
+                                buy_date=buy_date,
+                                buy_price=buy_price,
+                                sell_date=current_date,
+                                sell_price=sell_price,
+                                trading_cost_pct=trading_cost_pct,
+                                reason=sell_reason,
+                                active_setup=active_setup,
+                            )
                         )
                         in_position = False
                         active_setup = {}
@@ -237,27 +321,16 @@ def check_stock(
             if in_position:
                 final_row = df.iloc[-1]
                 final_sell_price = final_row["Close"]
-                gross_return_pct = (final_sell_price - buy_price) / buy_price * 100
-                net_return_pct = gross_return_pct - trading_cost_pct
                 trades.append(
-                    {
-                        "buy_date": buy_date,
-                        "buy_price": buy_price,
-                        "sell_date": df.index[-1].strftime("%Y-%m-%d"),
-                        "sell_price": final_sell_price,
-                        "gross_return_pct": gross_return_pct,
-                        "cost_pct": trading_cost_pct,
-                        "return_pct": net_return_pct,
-                        "reason": "回測結束平倉",
-                        "buy_rs_spread_pct": active_setup.get("rs_spread_pct"),
-                        "w_support_price": active_setup.get("support_price"),
-                        "w_stop_price": active_setup.get("stop_price"),
-                        "w_target_price": active_setup.get("target_price"),
-                        "gap_support_price": active_setup.get("gap_support_price"),
-                        "gap_stop_price": active_setup.get("gap_stop_price"),
-                        "gap_day": active_setup.get("gap_day"),
-                        "gap_shadow_day": active_setup.get("shadow_confirm_day"),
-                    }
+                    _build_trade_record(
+                        buy_date=buy_date,
+                        buy_price=buy_price,
+                        sell_date=df.index[-1].strftime("%Y-%m-%d"),
+                        sell_price=final_sell_price,
+                        trading_cost_pct=trading_cost_pct,
+                        reason="回測結束平倉",
+                        active_setup=active_setup,
+                    )
                 )
 
             if not trades:
@@ -296,105 +369,64 @@ def check_stock(
                 "rs_min_outperformance_pct": rs_min_outperformance_pct,
             }
 
-        matched, _ = evaluate_buy_signal(
+        matched, buy_setup = evaluate_registered_buy_strategies(
             df,
             selected_strategies,
-            benchmark_df,
-            range_lookback_days,
-            range_max_width_pct,
-            range_volume_ratio,
-            range_min_price_gain_pct,
-            range_max_price_gain_pct,
-            range_volume_sustain_days,
-            w_bottom_lookback_days,
-            w_bottom_tolerance_pct,
-            w_bottom_min_rebound_pct,
-            w_bottom_lower_shadow_ratio,
-            w_bottom_stop_buffer_pct,
-            gap_channel_lookback_days,
-            gap_channel_max_width_pct,
-            gap_lookback_days,
-            gap_min_gap_pct,
-            gap_hold_tolerance_pct,
-            gap_lower_shadow_lookback_days,
-            gap_lower_shadow_ratio,
-            gap_stop_buffer_pct,
-            rs_lookback_days,
-            rs_min_outperformance_pct,
-            vcp_lookback_days,
-            vcp_min_uptrend_pct,
-            vcp_breakout_volume_ratio,
-            vcp_near_pivot_tolerance_pct,
-            vcp_max_consolidation_depth_pct,
+            benchmark_df=benchmark_df,
+            params=buy_strategy_params,
         )
         if matched:
-            bowl_analysis = None
-            vcp_analysis = None
-            if "區間量增啟動" in selected_strategies:
-                bowl_analysis = analyze_bowl_bottom_candidate(
-                    df,
-                    lookback_days=range_lookback_days,
-                    max_range_width_pct=range_max_width_pct,
-                    min_volume_increase_ratio=range_volume_ratio,
-                    min_price_gain_pct=range_min_price_gain_pct,
-                    max_price_gain_pct=range_max_price_gain_pct,
-                    min_sustain_days=range_volume_sustain_days,
-                )
-            if "VCP 收斂突破" in selected_strategies:
-                vcp_analysis = analyze_vcp_candidate(
-                    df,
-                    lookback_days=vcp_lookback_days,
-                    min_uptrend_pct=vcp_min_uptrend_pct,
-                    breakout_volume_ratio=vcp_breakout_volume_ratio,
-                    near_pivot_tolerance_pct=vcp_near_pivot_tolerance_pct,
-                    max_consolidation_depth_pct=vcp_max_consolidation_depth_pct,
-                )
-            rs_spread_pct = None
-            if "相對強弱濾網" in selected_strategies:
-                rs_spread_pct = calculate_relative_strength_spread(df, benchmark_df, rs_lookback_days)
             latest_volume = float(df["Volume"].iloc[-1]) if "Volume" in df.columns else 0.0
-            avg_volume_3 = bowl_analysis.get("avg_volume_3") if bowl_analysis else None
-            avg_volume_prev3 = bowl_analysis.get("avg_volume_prev3") if bowl_analysis else None
-            avg_volume_20 = bowl_analysis.get("avg_volume_20") if bowl_analysis else None
-            current_volume_ratio = bowl_analysis.get("current_volume_ratio") if bowl_analysis else None
-            recent3_volume_ratio = bowl_analysis.get("recent3_volume_ratio") if bowl_analysis else None
-            long_term_volume_ratio = bowl_analysis.get("avg5_volume_ratio") if bowl_analysis else None
-            recent_window = df.tail(range_lookback_days)
-            bowl_bottom = float(recent_window["Low"].min()) if not recent_window.empty else None
-            recovery_from_bottom_pct = ((float(df["Close"].iloc[-1]) / bowl_bottom) - 1) * 100 if bowl_bottom else None
             return {
                 "name": get_chinese_name(stock_id),
                 "price": round(float(df["Close"].iloc[-1]), 2),
-                "rs_spread_pct": rs_spread_pct,
+                "rs_spread_pct": buy_setup.get("rs_spread_pct"),
                 "latest_volume": round(latest_volume),
-                "avg_volume_3": round(avg_volume_3) if avg_volume_3 is not None else None,
-                "avg_volume_prev3": round(avg_volume_prev3) if avg_volume_prev3 is not None else None,
-                "avg_volume_20": round(avg_volume_20) if avg_volume_20 is not None else None,
-                "current_volume_ratio": round(current_volume_ratio, 2) if current_volume_ratio is not None else None,
-                "recent3_volume_ratio": round(recent3_volume_ratio, 2) if recent3_volume_ratio is not None else None,
-                "avg5_volume_ratio": round(long_term_volume_ratio, 2) if long_term_volume_ratio is not None else None,
-                "recovery_from_bottom_pct": round(recovery_from_bottom_pct, 2) if recovery_from_bottom_pct is not None else None,
-                "bowl_score": bowl_analysis["score"] if bowl_analysis else None,
-                "bowl_grade": bowl_analysis["grade"] if bowl_analysis else None,
-                "bowl_depth_pct": bowl_analysis["base_depth_pct"] if bowl_analysis else None,
-                "sustain_days": bowl_analysis["sustain_days"] if bowl_analysis else None,
-                "peak_distance_pct": bowl_analysis["peak_distance_pct"] if bowl_analysis else None,
-                "range_position_pct": bowl_analysis["range_position_pct"] if bowl_analysis else None,
-                "breakout_pct": bowl_analysis["breakout_pct"] if bowl_analysis else None,
-                "positive_reasons": bowl_analysis["positive_reasons"] if bowl_analysis else [],
-                "caution_reasons": bowl_analysis["caution_reasons"] if bowl_analysis else [],
-                "vcp_score": vcp_analysis["score"] if vcp_analysis else None,
-                "vcp_prior_uptrend_pct": vcp_analysis["prior_uptrend_pct"] if vcp_analysis else None,
-                "vcp_consolidation_depth_pct": vcp_analysis["consolidation_depth_pct"] if vcp_analysis else None,
-                "vcp_near_pivot_pct": vcp_analysis["near_pivot_pct"] if vcp_analysis else None,
-                "vcp_distribution_days": vcp_analysis["distribution_days"] if vcp_analysis else None,
-                "vcp_breakout_confirmed": vcp_analysis["breakout_confirmed"] if vcp_analysis else None,
-                "vcp_positive_reasons": vcp_analysis["positive_reasons"] if vcp_analysis else [],
-                "vcp_caution_reasons": vcp_analysis["caution_reasons"] if vcp_analysis else [],
+                "avg_volume_3": buy_setup.get("avg_volume_3"),
+                "avg_volume_prev3": buy_setup.get("avg_volume_prev3"),
+                "avg_volume_20": buy_setup.get("avg_volume_20"),
+                "current_volume_ratio": buy_setup.get("current_volume_ratio"),
+                "recent3_volume_ratio": buy_setup.get("recent3_volume_ratio"),
+                "avg5_volume_ratio": buy_setup.get("avg5_volume_ratio"),
+                "recovery_from_bottom_pct": buy_setup.get("recovery_from_bottom_pct"),
+                "bowl_score": buy_setup.get("bowl_score"),
+                "bowl_grade": buy_setup.get("bowl_grade"),
+                "bowl_depth_pct": buy_setup.get("bowl_depth_pct"),
+                "sustain_days": buy_setup.get("sustain_days"),
+                "peak_distance_pct": buy_setup.get("peak_distance_pct"),
+                "range_position_pct": buy_setup.get("range_position_pct"),
+                "breakout_pct": buy_setup.get("breakout_pct"),
+                "positive_reasons": buy_setup.get("positive_reasons") or [],
+                "caution_reasons": buy_setup.get("caution_reasons") or [],
+                "vcp_score": buy_setup.get("vcp_score"),
+                "vcp_prior_uptrend_pct": buy_setup.get("vcp_prior_uptrend_pct"),
+                "vcp_consolidation_depth_pct": buy_setup.get("vcp_consolidation_depth_pct"),
+                "vcp_near_pivot_pct": buy_setup.get("vcp_near_pivot_pct"),
+                "vcp_distribution_days": buy_setup.get("vcp_distribution_days"),
+                "vcp_breakout_confirmed": buy_setup.get("vcp_breakout_confirmed"),
+                "vcp_positive_reasons": buy_setup.get("vcp_positive_reasons") or [],
+                "vcp_caution_reasons": buy_setup.get("vcp_caution_reasons") or [],
+                "pullback_score": buy_setup.get("pullback_score"),
+                "pullback_depth_pct": buy_setup.get("pullback_depth_pct"),
+                "pullback_reference_high": buy_setup.get("pullback_reference_high"),
+                "pullback_guard_low": buy_setup.get("pullback_guard_low"),
+                "pullback_prior_close": buy_setup.get("pullback_prior_close"),
+                "pullback_latest_close": buy_setup.get("pullback_latest_close"),
+                "pullback_positive_reasons": buy_setup.get("pullback_positive_reasons") or [],
+                "pullback_caution_reasons": buy_setup.get("pullback_caution_reasons") or [],
+                "pullback_latest_volume_lots": buy_setup.get("pullback_latest_volume_lots"),
+                "pullback_low_price_volume_price_threshold": buy_setup.get("pullback_low_price_volume_price_threshold"),
+                "pullback_low_price_min_volume_lots": buy_setup.get("pullback_low_price_min_volume_lots"),
+                "high_price_pullback_score": buy_setup.get("high_price_pullback_score"),
+                "high_price_pullback_depth_pct": buy_setup.get("high_price_pullback_depth_pct"),
+                "high_price_pullback_reference_high": buy_setup.get("high_price_pullback_reference_high"),
+                "high_price_pullback_latest_close": buy_setup.get("high_price_pullback_latest_close"),
+                "high_price_pullback_positive_reasons": buy_setup.get("high_price_pullback_positive_reasons") or [],
+                "high_price_pullback_caution_reasons": buy_setup.get("high_price_pullback_caution_reasons") or [],
             }
         return None
     except Exception as exc:
-        print(f"Error checking {stock_id}: {exc}")
+        logger.exception("Error checking stock %s", stock_id)
         return None
 
 
@@ -441,6 +473,15 @@ def scan_market(
     vcp_breakout_volume_ratio=1.5,
     vcp_near_pivot_tolerance_pct=3.0,
     vcp_max_consolidation_depth_pct=25.0,
+    pullback_strong_lookback_days=20,
+    pullback_min_pullback_pct=10.0,
+    pullback_base_hold_days=3,
+    pullback_low_price_volume_price_threshold=500.0,
+    pullback_low_price_min_volume_lots=700.0,
+    pullback_technology_only=True,
+    high_price_pullback_lookback_days=20,
+    high_price_pullback_market_cap_rank_limit=50,
+    high_price_pullback_min_drop_pct=15.0,
     progress_callback=None,
     status_callback=None,
 ):
@@ -450,10 +491,11 @@ def scan_market(
     total_stocks = len(securities)
     history_buffer_days = get_history_buffer_days(
         selected_strategies,
-        selected_sell_strategies,
-        rs_lookback_days,
+        selected_sell_strategies=selected_sell_strategies,
+        rs_lookback_days=rs_lookback_days,
     )
     benchmark_df = None
+    market_cap_leader_symbol_set = frozenset()
 
     if "相對強弱濾網" in selected_strategies:
         benchmark_df = fetch_price_history(
@@ -462,6 +504,13 @@ def scan_market(
             start_date,
             end_date,
             history_buffer_days=history_buffer_days,
+        )
+
+    if "高價股回檔" in selected_strategies:
+        trade_date_text = _resolve_scan_trade_date_text(mode=mode, end_date=end_date)
+        market_cap_leader_symbol_set = _load_market_cap_leader_symbol_set(
+            trade_date_text,
+            high_price_pullback_market_cap_rank_limit,
         )
 
     if total_stocks == 0:
@@ -513,6 +562,16 @@ def scan_market(
             vcp_breakout_volume_ratio,
             vcp_near_pivot_tolerance_pct,
             vcp_max_consolidation_depth_pct,
+            pullback_strong_lookback_days,
+            pullback_min_pullback_pct,
+            pullback_base_hold_days,
+            pullback_low_price_volume_price_threshold,
+            pullback_low_price_min_volume_lots,
+            pullback_technology_only,
+            high_price_pullback_lookback_days,
+            high_price_pullback_market_cap_rank_limit,
+            high_price_pullback_min_drop_pct,
+            market_cap_leader_symbol_set,
             history_buffer_days,
         )
 

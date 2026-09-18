@@ -5,9 +5,9 @@ from datetime import datetime
 from functools import lru_cache
 
 from modules.core.http_utils import request_bytes
-from modules.core.project_paths import data_path
+from modules.core.project_paths import db_path
 
-DB_PATH = data_path("stocks.db")
+DB_PATH = db_path("stocks.db")
 
 LISTED_CSV_URL = "https://mopsfin.twse.com.tw/opendata/t187ap03_L.csv"
 OTC_CSV_URL = "https://dts.twse.com.tw/opendata/t187ap03_O.csv"
@@ -224,25 +224,32 @@ def get_stock_name(stock_id):
 
 
 def find_security(stock_input):
-    """用股票代號或 yfinance symbol 找主檔資料。"""
+    """用股票代號、yfinance symbol 或中文名稱找主檔資料。"""
     init_stock_db()
-    normalized = (stock_input or "").strip().upper()
-    if not normalized:
+    raw_text = (stock_input or "").strip()
+    normalized = raw_text.upper()
+    if not raw_text:
         return None
 
     code = normalized.split(".")[0]
+    like_text = f"%{raw_text}%"
     with _get_connection() as conn:
         row = conn.execute(
             """
             SELECT code, name_zh, full_name_zh, market, yfinance_symbol, industry_code, paid_in_capital, issued_common_shares
             FROM securities
-            WHERE yfinance_symbol = ? OR code = ?
+            WHERE yfinance_symbol = ?
+               OR code = ?
+               OR name_zh LIKE ?
+               OR full_name_zh LIKE ?
             ORDER BY
                 CASE WHEN yfinance_symbol = ? THEN 0 ELSE 1 END,
+                CASE WHEN code = ? THEN 0 ELSE 1 END,
+                CASE WHEN name_zh = ? THEN 0 ELSE 1 END,
                 CASE market WHEN 'TWSE' THEN 0 ELSE 1 END
             LIMIT 1
             """,
-            (normalized, code, normalized),
+            (normalized, code, like_text, like_text, normalized, code, raw_text),
         ).fetchone()
 
     return dict(row) if row else None

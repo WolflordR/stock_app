@@ -1,8 +1,18 @@
 BUY_STRATEGY_METADATA = {
+    "強勢股回檔量縮止跌": {
+        "title": "🛟 強勢股回檔收盤守住",
+        "summary": "自高點明顯回檔後，收盤守住低點，低價股還要有基本量能",
+        "description": "看近端高點回檔是否夠深、最近幾天收盤有沒有守住防守低點，另外 500 元以下的股票必須至少有 700 張成交量。",
+    },
     "VCP 收斂突破": {
         "title": "🎯 VCP 收斂突破",
         "summary": "強勢股 + 波動收斂 + 量縮後突破",
         "description": "找原本就強、整理時回檔幅度與量能持續收斂，最後放量突破壓力的股票。",
+    },
+    "高價股回檔": {
+        "title": "💎 大市值回檔",
+        "summary": "前 50 大市值公司，且距近 20 日高點回檔超過 15%",
+        "description": "專門找大型權值股從近 20 日高點明顯回檔的名單，預設只要求市值夠大、回檔夠深。",
     },
 }
 
@@ -59,5 +69,5 @@ SELL_STRATEGY_METADATA = {
     },
 }
 
-DEFAULT_BUY_STRATEGIES = ["VCP 收斂突破"]
+DEFAULT_BUY_STRATEGIES = ["強勢股回檔量縮止跌"]
 DEFAULT_SELL_STRATEGIES = ["停利 10% / 停損 5%", "初始停損", "移動式停損"]

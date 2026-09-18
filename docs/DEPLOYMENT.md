@@ -1,14 +1,15 @@
 # Trade Lab Deployment Guide
 
-This app is best deployed as an internal service on a workstation or Linux server.
+Trade Lab 的正式方向是 React web + FastAPI API + worker，NAS 負責保存資料庫、快取、log 與備份。舊 Streamlit UI 已移到 `archive/legacy_streamlit/`，只保留為參考。
 
 ## Recommended architecture
 
 1. Keep the code in a fixed directory such as `/opt/trade-app`
-2. Run Streamlit as a `systemd` service
-3. Put `nginx` in front of Streamlit
-4. Restrict access to your LAN, VPN, or reverse proxy authentication
-5. Update with `git pull` and restart the service
+2. Keep market data under a NAS folder, for example `/volume1/trade/data`
+3. Run FastAPI as the internal API service
+4. Serve the React build with nginx, Docker, or NAS web station
+5. Run crawler / backup jobs separately as worker tasks
+6. Restrict access to your LAN, VPN, or reverse proxy authentication
 
 ## 1. Prepare the workstation
 
@@ -37,103 +38,124 @@ stock_env/bin/pip install -r requirements.txt
 
 If you use local Ollama on the workstation, install and start it separately.
 
-## 2. Streamlit configuration
+## 2. NAS data configuration
 
-Copy the example config:
-
-```bash
-mkdir -p .streamlit
-cp deploy/.streamlit/config.toml.example .streamlit/config.toml
-```
-
-## 3. Create the systemd service
-
-Copy the example service:
+Copy the example NAS env file:
 
 ```bash
-sudo cp deploy/systemd/trade-app.service.example /etc/systemd/system/trade-app.service
+cp .env.nas.example .env.nas
 ```
 
-Edit the following if needed:
-
-- `User`
-- `Group`
-- `WorkingDirectory`
-- `ExecStart`
-- `OPENAI_API_KEY`
-- `OPENAI_NEWS_MODEL`
-
-Reload and start:
+Edit `.env.nas`:
 
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable trade-app
-sudo systemctl start trade-app
-sudo systemctl status trade-app --no-pager
+TRADE_NAS_ROOT=/volume1/trade
+TRADE_DATA_DIR=${TRADE_NAS_ROOT}/data
+TRADE_DB_DIR=${TRADE_NAS_ROOT}/data/db
+TRADE_RAW_DATA_DIR=${TRADE_NAS_ROOT}/data/raw
+TRADE_LOGS_DIR=${TRADE_NAS_ROOT}/logs
+TRADE_BACKUPS_DIR=${TRADE_NAS_ROOT}/backups
 ```
 
-## 4. Put nginx in front
-
-Copy the example nginx config:
+Prepare the NAS folder and copy current local data:
 
 ```bash
-sudo cp deploy/nginx/trade-app.conf.example /etc/nginx/sites-available/trade-app.conf
-sudo ln -s /etc/nginx/sites-available/trade-app.conf /etc/nginx/sites-enabled/trade-app.conf
-sudo nginx -t
-sudo systemctl reload nginx
+scripts/init_nas_data.sh
 ```
 
-Then point your internal DNS or hosts entry to:
-
-- `trade-app.internal`
-
-You can also change `server_name` to a workstation IP or internal hostname.
-
-## 5. Update the app frequently
-
-Use the included deploy script:
+By default this keeps existing NAS files. To overwrite with current local files:
 
 ```bash
-APP_DIR=/opt/trade-app \
-APP_USER=tradeapp \
-APP_GROUP=tradeapp \
-BRANCH=main \
-SERVICE_NAME=trade-app \
-bash deploy/deploy.sh
+TRADE_FORCE_COPY=1 scripts/init_nas_data.sh
 ```
 
-What this does:
-
-1. Pulls the latest code
-2. Installs dependencies
-3. Fixes file ownership
-4. Restarts the systemd service
-
-## 6. Useful commands
-
-Start or stop the app:
+Prepare and verify a local NAS-like folder:
 
 ```bash
-sudo systemctl start trade-app
-sudo systemctl stop trade-app
-sudo systemctl restart trade-app
+scripts/check_nas_dry_run.sh
 ```
 
-Check logs:
+For real NAS deployment, use your mounted NAS path instead of `/private/tmp/trade_nas`.
+
+## 3. Run API and web locally against NAS data
+
+Start API:
 
 ```bash
-sudo journalctl -u trade-app -f
+scripts/run_api_nas.sh
 ```
 
-Check nginx logs:
+Start web in another terminal:
 
 ```bash
-sudo tail -f /var/log/nginx/access.log /var/log/nginx/error.log
+scripts/run_web_nas.sh
 ```
 
-## 7. Security notes
+Open:
 
-Do not expose raw Streamlit directly to the internet.
+```text
+http://127.0.0.1:5173
+```
+
+## 4. Docker Compose on NAS / Linux
+
+The compose file is under `infra/docker-compose.yml`:
+
+```bash
+scripts/nas_compose_up.sh
+scripts/nas_health_check.sh
+```
+
+It mounts:
+
+```text
+${TRADE_NAS_ROOT}/data   -> /trade/data
+${TRADE_NAS_ROOT}/logs   -> /trade/logs
+${TRADE_NAS_ROOT}/backups -> /trade/backups
+```
+
+Inside containers, DB files live under `/trade/data/db`.
+
+The site opens at:
+
+```text
+http://<NAS-IP>:8080
+```
+
+The API health endpoint is:
+
+```text
+http://<NAS-IP>:8000/health
+```
+
+## 5. Useful commands
+
+Check current data paths:
+
+```bash
+scripts/check_nas_dry_run.sh
+```
+
+Build web:
+
+```bash
+cd apps/web
+npm run build
+```
+
+Run API health check:
+
+```bash
+curl http://127.0.0.1:8000/health
+```
+
+Import manually downloaded broker branch CSV files:
+
+```bash
+python -m apps.worker.import_broker_csv_folder --date 2026-09-04
+```
+
+## 6. Security notes
 
 At minimum, use one of these:
 

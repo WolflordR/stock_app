@@ -5,6 +5,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from modules.core.trading_calendar import resolve_after_hours_trade_date
 from modules.core.http_utils import request_text
 from modules.data_sources.official_broker_import import (
     get_latest_official_broker_summary,
@@ -239,6 +240,12 @@ def fetch_broker_branch_summary(stock_input: str, *, top_n: int = 12, trade_date
     )
     if official_summary:
         return _build_official_summary_bundle(stock_code, official_summary, top_n=top_n)
+
+    if trade_date:
+        allowed_trade_date = resolve_after_hours_trade_date()["effective_date_text"]
+        requested_trade_date = str(trade_date).strip()
+        if requested_trade_date != allowed_trade_date:
+            raise ValueError(f"目前 Yahoo 只支援 {allowed_trade_date} 的當日分點榜，無法直接回補 {requested_trade_date}。")
 
     payload = _load_yahoo_broker_payload(stock_code)
     broker_data = payload["data"]

@@ -7,11 +7,11 @@ from datetime import datetime, timedelta
 
 import pandas as pd
 
-from modules.core.project_paths import data_path
+from modules.core.project_paths import db_path
 from modules.data_sources.market_watch import fetch_tpex_daily_quotes
 from modules.data_sources.market_watch import fetch_twse_daily_quotes
 
-DB_PATH = data_path("chip_cache.db")
+DB_PATH = db_path("chip_cache.db")
 TWSE_T86_URL = "https://www.twse.com.tw/rwd/zh/fund/T86"
 INVESTOR_COLUMN_MAP = {
     "三大法人": "total_net",

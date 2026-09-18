@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+import sqlite3
 from datetime import date, datetime, timedelta
 from functools import lru_cache
 
 import pandas as pd
 
+from modules.core.project_paths import db_path
 from modules.industry.company_links_db import get_company_profiles_df
-from modules.industry.company_links_db import get_company_theme_membership_df
 from modules.core.http_utils import request_json
 from modules.industry.industry_taxonomy import TECH_INDUSTRY_NAMES
-from modules.industry.industry_taxonomy import THEME_DEFINITIONS
+from modules.industry.industry_taxonomy import TIDE_LATEST_URL
+from modules.industry.industry_taxonomy import TIDE_SECTOR_TO_GROUP
 from modules.industry.industry_taxonomy import TWSE_TECH_INDEX_NAMES
 from modules.data_sources.market_watch import fetch_tpex_daily_quotes
 from modules.data_sources.market_watch import fetch_twse_daily_quotes
@@ -81,12 +83,31 @@ def _format_score_delta(value):
     return f"{sign}{value:.1f}"
 
 
+def _format_signed_yi(value):
+    if value is None or pd.isna(value):
+        return "-"
+    sign = "+" if value > 0 else ""
+    return f"{sign}{value:,.1f}"
+
+
 def _format_classification_source(value):
     return {
+        "tide_latest": "Tide分類",
         "seed_code": "核心名單",
         "seed_alias": "別名擴充",
         "manual_override": "人工覆寫",
     }.get(value, value or "-")
+
+
+@lru_cache(maxsize=8)
+def _load_tide_latest_payload():
+    payload = request_json(TIDE_LATEST_URL, timeout=30)
+    if not isinstance(payload, dict):
+        raise ValueError("Tide latest.json 格式不是物件")
+    sectors = payload.get("sectors")
+    if not isinstance(sectors, list):
+        raise ValueError("Tide latest.json 缺少 sectors")
+    return payload
 
 
 @lru_cache(maxsize=32)
@@ -132,26 +153,47 @@ def _load_market_history(anchor_date, history_trade_days=8, max_calendar_lookbac
 
 
 def _build_theme_membership_df():
-    theme_df = get_company_theme_membership_df().copy()
-    if theme_df.empty:
-        return pd.DataFrame(columns=["code", "group_name", "parent_industry", "official_industry", "name_zh", "market", "source", "confidence", "note"])
+    profiles_df = get_company_profiles_df()[["code", "name_zh", "market", "industry"]].copy()
+    profiles_df["code"] = profiles_df["code"].astype(str).str.zfill(4)
+    profile_lookup = profiles_df.drop_duplicates(subset=["code"], keep="last").set_index("code")
 
-    parent_industry_map = {
-        definition["theme"]: definition.get("parent_industry") or ""
-        for definition in THEME_DEFINITIONS
-    }
-    theme_df["code"] = theme_df["code"].astype(str).str.zfill(4)
-    theme_df["group_name"] = theme_df["theme"].astype(str).str.strip()
-    theme_df["official_industry"] = theme_df["industry"].fillna("").astype(str).str.strip()
-    theme_df["parent_industry"] = theme_df["group_name"].map(parent_industry_map).fillna(theme_df["industry"]).fillna("未分類")
-    return theme_df.rename(
-        columns={
-            "source": "classification_source",
-            "note": "classification_note",
-        }
-    )[
-        ["code", "group_name", "parent_industry", "official_industry", "name_zh", "market", "classification_source", "confidence", "classification_note"]
-    ].drop_duplicates(subset=["code", "group_name"], keep="first")
+    tide_payload = _load_tide_latest_payload()
+    tide_date = str(tide_payload.get("date") or tide_payload.get("updated_at") or "").strip()
+    rows = []
+    for sector in tide_payload.get("sectors", []):
+        if not isinstance(sector, dict):
+            continue
+        sector_name = str(sector.get("name") or "").strip()
+        if not sector_name:
+            continue
+        sector_group = TIDE_SECTOR_TO_GROUP.get(sector_name, "其他")
+        for raw_code in sector.get("stocks") or []:
+            code = str(raw_code or "").strip().zfill(4)
+            if not code:
+                continue
+            profile = profile_lookup.loc[code] if code in profile_lookup.index else {}
+            rows.append(
+                {
+                    "code": code,
+                    "group_name": sector_name,
+                    "parent_industry": sector_group,
+                    "official_industry": profile.get("industry", "") if hasattr(profile, "get") else "",
+                    "name_zh": profile.get("name_zh", "") if hasattr(profile, "get") else "",
+                    "market": profile.get("market", "") if hasattr(profile, "get") else "",
+                    "classification_source": "tide_latest",
+                    "confidence": 1.0,
+                    "classification_note": f"Tide latest.json {tide_date}",
+                }
+            )
+
+    if not rows:
+        return pd.DataFrame(columns=["code", "group_name", "parent_industry", "official_industry", "name_zh", "market", "classification_source", "confidence", "classification_note"])
+
+    membership_df = pd.DataFrame(rows)
+    membership_df["official_industry"] = membership_df["official_industry"].fillna("").astype(str).str.strip()
+    membership_df["name_zh"] = membership_df["name_zh"].fillna("").astype(str).str.strip()
+    membership_df["market"] = membership_df["market"].fillna("").astype(str).str.strip()
+    return membership_df.drop_duplicates(subset=["code", "group_name"], keep="first")
 
 
 def _build_official_industry_membership_df():
@@ -329,6 +371,395 @@ def _build_rotation_summary(history_df, membership_df):
     return summary_df, series_df, latest_component_df
 
 
+def _classify_fund_flow(net_5d_yi, accel_yi):
+    net_5d_yi = _safe_float(net_5d_yi) or 0.0
+    accel_yi = _safe_float(accel_yi) or 0.0
+    if net_5d_yi > 0 and accel_yi > 0:
+        return "漲潮"
+    if net_5d_yi > 0 and accel_yi <= 0:
+        return "輪動"
+    if -0.5 < net_5d_yi <= 0:
+        return "觀望"
+    return "退潮"
+
+
+def _format_flow_streak(streak, accel_yi):
+    streak = int(streak or 0)
+    accel_yi = _safe_float(accel_yi) or 0.0
+    if streak == 0:
+        return "資金沉寂"
+
+    inflow = streak > 0
+    accelerating = accel_yi > 0 if inflow else accel_yi < 0
+    direction = "流入" if inflow else "流出"
+    pace = "加速" if accelerating else "放緩"
+    return f"{abs(streak)}日{direction}{pace}"
+
+
+def _build_tide_sector_fund_flow_report(theme_summary_df):
+    tide_payload = _load_tide_latest_payload()
+    sectors = tide_payload.get("sectors") or []
+    if theme_summary_df.empty or not sectors:
+        return None
+
+    sector_rows = []
+    for sector in sectors:
+        if not isinstance(sector, dict):
+            continue
+        group_name = str(sector.get("name") or "").strip()
+        if not group_name:
+            continue
+        net_1d = _safe_float(sector.get("net_1d_yi")) or 0.0
+        net_5d = _safe_float(sector.get("net_5d_yi")) or 0.0
+        net_20d = _safe_float(sector.get("net_20d_yi")) or 0.0
+        accel_yi = (net_5d / 5.0) - (net_20d / 20.0)
+        sector_rows.append(
+            {
+                "group_name": group_name,
+                "fund_status": _classify_fund_flow(net_5d, accel_yi),
+                "net_1d_yi": net_1d,
+                "net_5d_yi": net_5d,
+                "net_20d_yi": net_20d,
+                "accel_yi": accel_yi,
+                "inflow_streak": int(_safe_float(sector.get("inflow_streak")) or 0),
+                "covered_stock_count": len(sector.get("stocks") or []),
+                "tide_position": _safe_float(sector.get("position")),
+                "tide_chg_1d": _safe_float(sector.get("chg_1d")),
+                "tide_chg_5d": _safe_float(sector.get("chg_5d")),
+            }
+        )
+
+    flow_summary_df = pd.DataFrame(sector_rows)
+    if flow_summary_df.empty:
+        return None
+
+    raw_df = theme_summary_df.merge(flow_summary_df, on="group_name", how="inner")
+    if raw_df.empty:
+        return None
+
+    status_order = {"漲潮": 0, "輪動": 1, "觀望": 2, "退潮": 3}
+    raw_df["fund_status_order"] = raw_df["fund_status"].map(status_order).fillna(9)
+    raw_df["bubble_size"] = raw_df["net_20d_yi"].abs().clip(lower=1.0)
+    raw_df = raw_df.sort_values(
+        ["fund_status_order", "net_5d_yi", "accel_yi", "latest_turnover"],
+        ascending=[True, False, False, False],
+    ).reset_index(drop=True)
+
+    display_df = raw_df.copy()
+    display_df["狀態"] = display_df["fund_status"]
+    display_df["細分產業"] = display_df["group_name"]
+    display_df["成分股"] = display_df.apply(
+        lambda row: f"{int(row['covered_stock_count'])}/{int(row['stock_count'])}",
+        axis=1,
+    )
+    display_df["今日淨買超(億)"] = display_df["net_1d_yi"].map(_format_signed_yi)
+    display_df["5日淨買超(億)"] = display_df["net_5d_yi"].map(_format_signed_yi)
+    display_df["20日累計(億)"] = display_df["net_20d_yi"].map(_format_signed_yi)
+    display_df["資金加速度"] = display_df["accel_yi"].map(_format_signed_yi)
+    display_df["今日漲跌"] = display_df["tide_chg_1d"].map(_format_pct)
+    display_df["5日漲跌"] = display_df["tide_chg_5d"].map(_format_pct)
+    display_df["資金停留"] = display_df.apply(
+        lambda row: _format_flow_streak(row["inflow_streak"], row["accel_yi"]),
+        axis=1,
+    )
+    display_df["代表股"] = display_df["representative_stocks"]
+    display_df = display_df[
+        [
+            "狀態",
+            "細分產業",
+            "成分股",
+            "今日淨買超(億)",
+            "5日淨買超(億)",
+            "20日累計(億)",
+            "資金加速度",
+            "今日漲跌",
+            "5日漲跌",
+            "資金停留",
+            "代表股",
+        ]
+    ]
+
+    stock_data = tide_payload.get("stock_data") or {}
+    profiles_df = get_company_profiles_df()[["code", "name_zh"]].copy()
+    profiles_df["code"] = profiles_df["code"].astype(str).str.zfill(4)
+    name_lookup = profiles_df.drop_duplicates(subset=["code"], keep="last").set_index("code")["name_zh"].to_dict()
+    stock_rows = []
+    for sector in sectors:
+        group_name = str((sector or {}).get("name") or "").strip()
+        if group_name not in set(raw_df["group_name"]):
+            continue
+        for raw_code in (sector or {}).get("stocks") or []:
+            code = str(raw_code or "").strip().zfill(4)
+            stock_metrics = stock_data.get(code) or {}
+            stock_rows.append(
+                {
+                    "group_name": group_name,
+                    "code": code,
+                    "name_zh": name_lookup.get(code, ""),
+                    "close": _safe_float(stock_metrics.get("price")),
+                    "net_1d_yi": _safe_float(stock_metrics.get("net_1d_yi")) or 0.0,
+                    "net_5d_yi": _safe_float(stock_metrics.get("net_5d_yi")) or 0.0,
+                    "net_20d_yi": _safe_float(stock_metrics.get("net_20d_yi")) or 0.0,
+                }
+            )
+
+    return {
+        "used_date": tide_payload.get("date"),
+        "history_trade_days": 20,
+        "raw_df": raw_df,
+        "display_df": display_df,
+        "stock_flow_df": pd.DataFrame(stock_rows),
+        "source": "Tide latest.json",
+        "updated_at": tide_payload.get("updated_at"),
+    }
+
+
+@lru_cache(maxsize=64)
+def _load_price_cache_for_dates(date_tuple, code_tuple):
+    if not date_tuple or not code_tuple:
+        return pd.DataFrame(columns=["trade_date", "code", "close"])
+
+    placeholders_dates = ",".join("?" for _ in date_tuple)
+    symbols = tuple(f"{code}.TW" for code in code_tuple)
+    placeholders_symbols = ",".join("?" for _ in symbols)
+    with sqlite3.connect(db_path("price_cache.db")) as conn:
+        price_df = pd.read_sql_query(
+            f"""
+            SELECT trade_date, symbol, close
+            FROM price_history
+            WHERE trade_date IN ({placeholders_dates})
+              AND symbol IN ({placeholders_symbols})
+            """,
+            conn,
+            params=tuple(date_tuple) + symbols,
+        )
+
+    if price_df.empty:
+        return pd.DataFrame(columns=["trade_date", "code", "close"])
+
+    price_df["code"] = price_df["symbol"].astype(str).str.replace(r"\.TW$", "", regex=True).str.zfill(4)
+    price_df["trade_date"] = pd.to_datetime(price_df["trade_date"]).dt.strftime("%Y-%m-%d")
+    price_df["close"] = pd.to_numeric(price_df["close"], errors="coerce")
+    return price_df[["trade_date", "code", "close"]].dropna(subset=["close"])
+
+
+@lru_cache(maxsize=64)
+def _load_institutional_flow_cache(anchor_date_text, trading_days):
+    anchor_date_text = pd.to_datetime(anchor_date_text).strftime("%Y-%m-%d")
+    with sqlite3.connect(db_path("chip_cache.db")) as conn:
+        date_rows = conn.execute(
+            """
+            SELECT DISTINCT trade_date
+            FROM institutional_trading
+            WHERE market = 'TWSE'
+              AND trade_date <= ?
+            ORDER BY trade_date DESC
+            LIMIT ?
+            """,
+            (anchor_date_text, int(trading_days)),
+        ).fetchall()
+        dates = tuple(sorted(row[0] for row in date_rows))
+        if not dates:
+            return pd.DataFrame(), tuple()
+
+        placeholders = ",".join("?" for _ in dates)
+        flow_df = pd.read_sql_query(
+            f"""
+            SELECT trade_date, code, name_zh, total_net
+            FROM institutional_trading
+            WHERE market = 'TWSE'
+              AND trade_date IN ({placeholders})
+            """,
+            conn,
+            params=dates,
+        )
+
+    if flow_df.empty:
+        return pd.DataFrame(), dates
+
+    flow_df["trade_date"] = pd.to_datetime(flow_df["trade_date"]).dt.strftime("%Y-%m-%d")
+    flow_df["code"] = flow_df["code"].astype(str).str.zfill(4)
+    flow_df["total_net"] = pd.to_numeric(flow_df["total_net"], errors="coerce").fillna(0.0)
+
+    codes = tuple(sorted(flow_df["code"].dropna().unique()))
+    price_df = _load_price_cache_for_dates(dates, codes)
+    if price_df.empty:
+        flow_df["close"] = pd.NA
+        flow_df["net_amount_yi"] = pd.NA
+    else:
+        flow_df = flow_df.merge(price_df, on=["trade_date", "code"], how="left")
+        flow_df["net_amount_yi"] = flow_df["total_net"] * flow_df["close"] / 100_000_000
+
+    return flow_df, dates
+
+
+def build_sector_fund_flow_report(theme_summary_df, anchor_date, trading_days=20):
+    empty_result = {
+        "used_date": None,
+        "history_trade_days": 0,
+        "raw_df": pd.DataFrame(),
+        "display_df": pd.DataFrame(),
+        "stock_flow_df": pd.DataFrame(),
+    }
+    if theme_summary_df.empty:
+        return empty_result
+
+    try:
+        tide_report = _build_tide_sector_fund_flow_report(theme_summary_df)
+        if tide_report is not None:
+            return tide_report
+    except Exception:
+        pass
+
+    flow_df, flow_dates = _load_institutional_flow_cache(
+        pd.to_datetime(anchor_date).strftime("%Y-%m-%d"),
+        int(trading_days),
+    )
+    if flow_df.empty or not flow_dates:
+        return empty_result
+
+    membership_df = _build_theme_membership_df()
+    if membership_df.empty:
+        return {**empty_result, "used_date": flow_dates[-1], "history_trade_days": len(flow_dates)}
+
+    merged_df = flow_df.merge(
+        membership_df[["code", "group_name", "name_zh", "market"]].drop_duplicates(subset=["code", "group_name"]),
+        on="code",
+        how="inner",
+        suffixes=("", "_profile"),
+    )
+    merged_df = merged_df.dropna(subset=["net_amount_yi"])
+    if merged_df.empty:
+        return {**empty_result, "used_date": flow_dates[-1], "history_trade_days": len(flow_dates)}
+
+    latest_date = flow_dates[-1]
+    daily_df = (
+        merged_df.groupby(["group_name", "trade_date"])
+        .agg(
+            institutional_stock_count=("code", "nunique"),
+            net_amount_yi=("net_amount_yi", "sum"),
+        )
+        .reset_index()
+        .sort_values(["group_name", "trade_date"])
+    )
+
+    sector_rows = []
+    for group_name, group_df in daily_df.groupby("group_name"):
+        group_df = group_df.set_index("trade_date").reindex(flow_dates).fillna({"net_amount_yi": 0.0, "institutional_stock_count": 0})
+        amount_series = pd.to_numeric(group_df["net_amount_yi"], errors="coerce").fillna(0.0)
+        covered_count = int(pd.to_numeric(group_df["institutional_stock_count"], errors="coerce").fillna(0).max())
+
+        latest_amount = float(amount_series.iloc[-1])
+        net_5d = float(amount_series.tail(min(5, len(amount_series))).sum())
+        net_20d = float(amount_series.sum())
+        accel_yi = (net_5d / min(5, len(amount_series))) - (net_20d / len(amount_series))
+        latest_direction = 1 if latest_amount > 0 else -1 if latest_amount < 0 else 0
+        streak = 0
+        if latest_direction:
+            for value in reversed(amount_series.tolist()):
+                if (value > 0 and latest_direction > 0) or (value < 0 and latest_direction < 0):
+                    streak += latest_direction
+                else:
+                    break
+
+        sector_rows.append(
+            {
+                "group_name": group_name,
+                "fund_status": _classify_fund_flow(net_5d, accel_yi),
+                "net_1d_yi": latest_amount,
+                "net_5d_yi": net_5d,
+                "net_20d_yi": net_20d,
+                "accel_yi": accel_yi,
+                "inflow_streak": int(streak),
+                "covered_stock_count": covered_count,
+            }
+        )
+
+    flow_summary_df = pd.DataFrame(sector_rows)
+    if flow_summary_df.empty:
+        return {**empty_result, "used_date": latest_date, "history_trade_days": len(flow_dates)}
+
+    raw_df = theme_summary_df.merge(flow_summary_df, on="group_name", how="inner")
+    if raw_df.empty:
+        return {**empty_result, "used_date": latest_date, "history_trade_days": len(flow_dates)}
+
+    status_order = {"漲潮": 0, "輪動": 1, "觀望": 2, "退潮": 3}
+    raw_df["fund_status_order"] = raw_df["fund_status"].map(status_order).fillna(9)
+    raw_df["bubble_size"] = raw_df["net_20d_yi"].abs().clip(lower=1.0)
+    raw_df = raw_df.sort_values(
+        ["fund_status_order", "net_5d_yi", "accel_yi", "latest_turnover"],
+        ascending=[True, False, False, False],
+    ).reset_index(drop=True)
+
+    display_df = raw_df.copy()
+    display_df["狀態"] = display_df["fund_status"]
+    display_df["細分產業"] = display_df["group_name"]
+    display_df["成分股"] = display_df.apply(
+        lambda row: f"{int(row['covered_stock_count'])}/{int(row['stock_count'])}",
+        axis=1,
+    )
+    display_df["今日淨買超(億)"] = display_df["net_1d_yi"].map(_format_signed_yi)
+    display_df["5日淨買超(億)"] = display_df["net_5d_yi"].map(_format_signed_yi)
+    display_df["20日累計(億)"] = display_df["net_20d_yi"].map(_format_signed_yi)
+    display_df["資金加速度"] = display_df["accel_yi"].map(_format_signed_yi)
+    display_df["今日漲跌"] = display_df["latest_change_pct"].map(_format_pct)
+    display_df["5日漲跌"] = display_df["five_day_change_pct"].map(_format_pct)
+    display_df["資金停留"] = display_df.apply(
+        lambda row: _format_flow_streak(row["inflow_streak"], row["accel_yi"]),
+        axis=1,
+    )
+    display_df["代表股"] = display_df["representative_stocks"]
+    display_df = display_df[
+        [
+            "狀態",
+            "細分產業",
+            "成分股",
+            "今日淨買超(億)",
+            "5日淨買超(億)",
+            "20日累計(億)",
+            "資金加速度",
+            "今日漲跌",
+            "5日漲跌",
+            "資金停留",
+            "代表股",
+        ]
+    ]
+
+    stock_daily_df = (
+        merged_df.groupby(["group_name", "code", "name_zh_profile", "trade_date"])
+        .agg(
+            net_amount_yi=("net_amount_yi", "sum"),
+            close=("close", "last"),
+        )
+        .reset_index()
+    )
+    stock_rows = []
+    for (group_name, code, name_zh), group_df in stock_daily_df.groupby(["group_name", "code", "name_zh_profile"]):
+        group_df = group_df.set_index("trade_date").reindex(flow_dates)
+        amount_series = pd.to_numeric(group_df["net_amount_yi"], errors="coerce").fillna(0.0)
+        close_series = pd.to_numeric(group_df["close"], errors="coerce")
+        stock_rows.append(
+            {
+                "group_name": group_name,
+                "code": code,
+                "name_zh": name_zh,
+                "close": close_series.dropna().iloc[-1] if close_series.notna().any() else None,
+                "net_1d_yi": float(amount_series.iloc[-1]),
+                "net_5d_yi": float(amount_series.tail(min(5, len(amount_series))).sum()),
+                "net_20d_yi": float(amount_series.sum()),
+            }
+        )
+    stock_flow_df = pd.DataFrame(stock_rows)
+
+    return {
+        "used_date": latest_date,
+        "history_trade_days": len(flow_dates),
+        "raw_df": raw_df,
+        "display_df": display_df,
+        "stock_flow_df": stock_flow_df,
+    }
+
+
 def _build_theme_members_display_df(component_df, selected_group):
     if component_df.empty or not selected_group:
         return pd.DataFrame()
@@ -463,6 +894,7 @@ def build_industry_rotation_bundle(anchor_date, history_trade_days=8):
         _build_official_industry_membership_df(),
     )
     twse_index_snapshot = load_twse_tech_index_snapshot()
+    fund_flow_report = build_sector_fund_flow_report(theme_summary_df, anchor_date, trading_days=20)
 
     latest_date = history_df["trade_date"].max().strftime("%Y-%m-%d")
     top_theme_name = theme_summary_df.iloc[0]["group_name"] if not theme_summary_df.empty else None
@@ -489,6 +921,7 @@ def build_industry_rotation_bundle(anchor_date, history_trade_days=8):
             "display_df": _build_display_df(theme_summary_df, "細分產業"),
             "series_df": theme_series_df,
             "component_df": latest_theme_component_df,
+            "fund_flow_report": fund_flow_report,
         },
         "industry_report": {
             "summary_df": industry_summary_df,

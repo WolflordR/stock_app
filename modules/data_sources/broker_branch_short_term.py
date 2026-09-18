@@ -6,7 +6,7 @@ from typing import Any
 import pandas as pd
 
 from modules.core.project_paths import data_path
-from modules.core.trading_calendar import resolve_recent_trade_date, resolve_trade_dates_in_range
+from modules.core.trading_calendar import resolve_after_hours_trade_date, resolve_recent_trade_date, resolve_trade_dates_in_range
 from modules.data_sources.broker_branch_data import BrokerBranchRow, fetch_broker_branch_summary, fetch_broker_branch_trace
 from modules.data_sources.market_watch import fetch_tpex_daily_quotes, fetch_twse_daily_quotes
 from modules.data_sources.stock_db import get_security_share_profile
@@ -64,16 +64,45 @@ def load_short_term_broker_tags() -> pd.DataFrame:
     return tag_df
 
 
-def _build_tag_lookup() -> dict[str, list[dict[str, str]]]:
+def _normalize_branch_name(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    for token in [" ", "　", "-", "－", "—", "_", "/", "\\", "(", ")", "（", "）"]:
+        text = text.replace(token, "")
+    for suffix in [
+        "證券股份有限公司",
+        "證券股分有限公司",
+        "證券有限公司",
+        "證券公司",
+        "股份有限公司",
+        "有限公司",
+        "證券",
+        "分公司",
+    ]:
+        text = text.replace(suffix, "")
+    return text.strip()
+
+
+def _build_tag_lookup() -> tuple[dict[str, list[dict[str, str]]], dict[str, list[dict[str, str]]]]:
     tag_df = load_short_term_broker_tags()
-    lookup: dict[str, list[dict[str, str]]] = {}
+    raw_lookup: dict[str, list[dict[str, str]]] = {}
+    normalized_lookup: dict[str, list[dict[str, str]]] = {}
     for row in tag_df.to_dict("records"):
-        lookup.setdefault(row["branch_name"], []).append(row)
-    return lookup
+        branch_name = row["branch_name"]
+        raw_lookup.setdefault(branch_name, []).append(row)
+        normalized = _normalize_branch_name(branch_name)
+        if normalized:
+            normalized_lookup.setdefault(normalized, []).append(row)
+    return raw_lookup, normalized_lookup
 
 
 def _load_latest_quote_row(stock_code: str, requested_date: str | None = None) -> dict[str, Any]:
-    resolved = resolve_recent_trade_date(requested_date or pd.Timestamp.today().strftime("%Y-%m-%d"))
+    resolved = (
+        resolve_recent_trade_date(requested_date)
+        if requested_date
+        else resolve_after_hours_trade_date()
+    )
     effective_date = resolved["effective_date_text"]
     twse_df = fetch_twse_daily_quotes(effective_date)
     tpex_df = fetch_tpex_daily_quotes(effective_date)
@@ -121,21 +150,91 @@ def _load_volume_window_lots(stock_code: str, trade_date: str, days_window: int)
     return total_lots or None
 
 
-def _enrich_branch_row(row: BrokerBranchRow, tag_lookup: dict[str, list[dict[str, str]]], latest_close_value: float | None = None) -> dict[str, Any]:
+def _match_branch_tags(
+    broker_branch: str,
+    raw_lookup: dict[str, list[dict[str, str]]],
+    normalized_lookup: dict[str, list[dict[str, str]]],
+) -> list[dict[str, str]]:
+    direct = raw_lookup.get(broker_branch)
+    if direct:
+        return direct
+
+    normalized_branch = _normalize_branch_name(broker_branch)
+    if not normalized_branch:
+        return []
+
+    direct_normalized = normalized_lookup.get(normalized_branch)
+    if direct_normalized:
+        return direct_normalized
+
+    for candidate, rows in sorted(normalized_lookup.items(), key=lambda item: len(item[0]), reverse=True):
+        if len(candidate) < 3:
+            continue
+        if candidate in normalized_branch:
+            return rows
+    return []
+
+
+def _derive_dynamic_short_term_tags(row: BrokerBranchRow) -> tuple[list[str], list[str]]:
+    buy_lots = _safe_float(row.buy_shares) or 0.0
+    sell_lots = _safe_float(row.sell_shares) or 0.0
+    net_lots = abs(_safe_float(row.net_shares) or 0.0)
+    gross_lots = buy_lots + sell_lots
+
+    if gross_lots <= 0:
+        return [], []
+
+    tag_labels: list[str] = []
+    group_labels: list[str] = []
+
+    dual_side_active = min(buy_lots, sell_lots) >= 50 and gross_lots >= 300
+    low_net_ratio = net_lots <= gross_lots * 0.45
+    very_high_turnover = gross_lots >= 1200 and net_lots <= gross_lots * 0.35
+
+    if dual_side_active and low_net_ratio:
+        tag_labels.append("當沖活躍")
+        group_labels.append("高周轉")
+    if very_high_turnover:
+        tag_labels.append("高周轉")
+        group_labels.append("短線來回")
+
+    return tag_labels, group_labels
+
+
+def _dedupe_labels(labels: list[str]) -> list[str]:
+    output: list[str] = []
+    seen: set[str] = set()
+    for label in labels:
+        if not label or label in seen:
+            continue
+        output.append(label)
+        seen.add(label)
+    return output
+
+
+def _enrich_branch_row(
+    row: BrokerBranchRow,
+    raw_lookup: dict[str, list[dict[str, str]]],
+    normalized_lookup: dict[str, list[dict[str, str]]],
+    latest_close_value: float | None = None,
+) -> dict[str, Any]:
     raw = asdict(row)
     net_lots = _safe_float(row.net_shares)
     avg_price = _safe_float(row.avg_price)
     total_profit_k = _safe_float(row.total_profit_k)
     if total_profit_k is None and net_lots is not None and avg_price is not None and latest_close_value is not None:
         total_profit_k = (latest_close_value - avg_price) * net_lots * 0.1
-    tags = tag_lookup.get(row.broker_branch, [])
+    tags = _match_branch_tags(row.broker_branch, raw_lookup, normalized_lookup)
+    dynamic_tag_labels, dynamic_group_labels = _derive_dynamic_short_term_tags(row)
+    tag_labels = _dedupe_labels([tag["tag"] for tag in tags] + dynamic_tag_labels)
+    group_labels = _dedupe_labels([tag["group_name"] for tag in tags if tag.get("group_name")] + dynamic_group_labels)
     return raw | {
         "net_lots_value": net_lots,
         "avg_price_value": avg_price,
         "total_profit_k_value": total_profit_k,
-        "is_short_term": bool(tags),
-        "tag_labels": [tag["tag"] for tag in tags],
-        "group_labels": [tag["group_name"] for tag in tags if tag.get("group_name")],
+        "is_short_term": bool(tags) or bool(dynamic_tag_labels),
+        "tag_labels": tag_labels,
+        "group_labels": group_labels,
     }
 
 
@@ -155,6 +254,119 @@ def _build_display_rows(rows: list[dict[str, Any]], *, side_label: str) -> list[
             }
         )
     return display_rows
+
+
+def build_today_chip_quick_report(
+    stock_code: str,
+    *,
+    trade_date: str | None = None,
+    top_n: int = 15,
+    total_volume_lots: float | None = None,
+    latest_close_value: float | None = None,
+) -> dict[str, Any]:
+    summary_bundle = fetch_broker_branch_summary(stock_code, top_n=top_n, trade_date=trade_date)
+    raw_tag_lookup, normalized_tag_lookup = _build_tag_lookup()
+
+    buy_rows = [
+        _enrich_branch_row(row, raw_tag_lookup, normalized_tag_lookup, latest_close_value)
+        for row in summary_bundle.get("buy_side") or []
+    ]
+    sell_rows = [
+        _enrich_branch_row(row, raw_tag_lookup, normalized_tag_lookup, latest_close_value)
+        for row in summary_bundle.get("sell_side") or []
+    ]
+
+    share_profile = get_security_share_profile(stock_code) or {}
+    issued_common_shares = _safe_float(share_profile.get("issued_common_shares"))
+    issued_common_lots = (issued_common_shares / 1000.0) if issued_common_shares is not None and issued_common_shares != 0 else None
+
+    short_term_buy_lots = sum(row["net_lots_value"] or 0.0 for row in buy_rows if row["is_short_term"])
+    short_term_sell_lots = sum(abs(row["net_lots_value"] or 0.0) for row in sell_rows if row["is_short_term"])
+    main_buy_lots = sum(row["net_lots_value"] or 0.0 for row in buy_rows)
+    main_sell_lots = sum(abs(row["net_lots_value"] or 0.0) for row in sell_rows)
+    main_net_lots = main_buy_lots - main_sell_lots
+    buy_top5_lots = sum(row["net_lots_value"] or 0.0 for row in buy_rows[:5])
+    sell_top5_lots = sum(abs(row["net_lots_value"] or 0.0) for row in sell_rows[:5])
+    concentration_lots = main_net_lots
+
+    if total_volume_lots and total_volume_lots > 0:
+        for row in buy_rows + sell_rows:
+            row["weight_pct"] = _safe_ratio_percent(abs(row.get("net_lots_value") or 0.0), total_volume_lots)
+    else:
+        for row in buy_rows + sell_rows:
+            row["weight_pct"] = None
+
+    main_net_pct = _safe_ratio_percent(main_net_lots, total_volume_lots)
+    concentration_pct = _safe_ratio_percent(concentration_lots, total_volume_lots)
+    short_term_buy_pct = _safe_ratio_percent(short_term_buy_lots, total_volume_lots)
+    short_term_sell_pct = _safe_ratio_percent(short_term_sell_lots, total_volume_lots)
+    buy_top5_pct = _safe_ratio_percent(buy_top5_lots, total_volume_lots)
+    sell_top5_pct = _safe_ratio_percent(sell_top5_lots, total_volume_lots)
+    estimated_float_pct = _safe_ratio_percent(concentration_lots, issued_common_lots)
+    interval_turnover_pct = _safe_ratio_percent(total_volume_lots, issued_common_lots)
+
+    signal_label, signal_reason = _derive_signal(
+        main_net_pct=main_net_pct,
+        concentration_pct=concentration_pct,
+        short_term_buy_pct=short_term_buy_pct,
+        short_term_sell_pct=short_term_sell_pct,
+        buy_top5_pct=buy_top5_pct,
+        sell_top5_pct=sell_top5_pct,
+    )
+
+    alerts: list[str] = []
+    if main_net_pct and main_net_pct >= 8:
+        alerts.append(f"提醒：前15大分點主力買超占成交量 {main_net_pct:.2f}%")
+    if main_net_pct and main_net_pct <= -8:
+        alerts.append(f"提醒：前15大分點主力賣超占成交量 {abs(main_net_pct):.2f}%")
+    if short_term_buy_pct and short_term_buy_pct >= 10:
+        alerts.append(f"提醒：短衝主力買超占成交量 {short_term_buy_pct:.2f}%")
+    if short_term_sell_pct and short_term_sell_pct >= 10:
+        alerts.append(f"提醒：短衝主力賣超占成交量 {short_term_sell_pct:.2f}%")
+    if buy_top5_pct and buy_top5_pct >= 20:
+        alerts.append(f"提醒：買方前五大分點集中度 {buy_top5_pct:.2f}%")
+    if sell_top5_pct and sell_top5_pct >= 20:
+        alerts.append(f"提醒：賣方前五大分點集中度 {sell_top5_pct:.2f}%")
+
+    return {
+        "stock_code": stock_code,
+        "stock_title": _clean_stock_title(summary_bundle.get("stock_title") or stock_code),
+        "source_url": summary_bundle.get("source_url"),
+        "source_label": summary_bundle.get("source_label") or "",
+        "trade_date": summary_bundle.get("trade_date") or trade_date,
+        "history_mode": "current_snapshot_only",
+        "days_window": 1,
+        "quote_row": {},
+        "buy_rows": buy_rows,
+        "sell_rows": sell_rows,
+        "buy_display_rows": _build_display_rows(buy_rows, side_label="買超"),
+        "sell_display_rows": _build_display_rows(sell_rows, side_label="賣超"),
+        "summary": {
+            "signal_label": signal_label,
+            "signal_reason": signal_reason,
+            "total_volume_lots": total_volume_lots,
+            "main_buy_lots": main_buy_lots,
+            "main_sell_lots": main_sell_lots,
+            "main_net_lots": main_net_lots,
+            "main_net_pct": main_net_pct,
+            "concentration_pct": concentration_pct,
+            "short_term_buy_lots": short_term_buy_lots,
+            "short_term_sell_lots": short_term_sell_lots,
+            "short_term_buy_pct": short_term_buy_pct,
+            "short_term_sell_pct": short_term_sell_pct,
+            "buy_top5_lots": buy_top5_lots,
+            "sell_top5_lots": sell_top5_lots,
+            "buy_top5_pct": buy_top5_pct,
+            "sell_top5_pct": sell_top5_pct,
+            "concentration_lots": concentration_lots,
+            "estimated_float_pct": estimated_float_pct,
+            "interval_turnover_pct": interval_turnover_pct,
+            "issued_common_lots": issued_common_lots,
+            "short_term_buy_count": sum(1 for row in buy_rows if row["is_short_term"]),
+            "short_term_sell_count": sum(1 for row in sell_rows if row["is_short_term"]),
+        },
+        "alerts": alerts,
+    }
 
 
 def _window_trace_rows(detail_url: str, days_window: int) -> list[dict[str, Any]]:
@@ -223,10 +435,16 @@ def build_short_term_broker_report(stock_code: str, *, top_n: int = 15, days_win
     latest_close_value = _safe_float(quote_row.get("close"))
     requested_trade_date = quote_payload.get("trade_date")
     summary_bundle = fetch_broker_branch_summary(stock_code, top_n=top_n, trade_date=requested_trade_date)
-    tag_lookup = _build_tag_lookup()
+    raw_tag_lookup, normalized_tag_lookup = _build_tag_lookup()
 
-    base_buy_rows = [_enrich_branch_row(row, tag_lookup, latest_close_value) for row in summary_bundle.get("buy_side") or []]
-    base_sell_rows = [_enrich_branch_row(row, tag_lookup, latest_close_value) for row in summary_bundle.get("sell_side") or []]
+    base_buy_rows = [
+        _enrich_branch_row(row, raw_tag_lookup, normalized_tag_lookup, latest_close_value)
+        for row in summary_bundle.get("buy_side") or []
+    ]
+    base_sell_rows = [
+        _enrich_branch_row(row, raw_tag_lookup, normalized_tag_lookup, latest_close_value)
+        for row in summary_bundle.get("sell_side") or []
+    ]
 
     if days_window <= 1:
         buy_rows = base_buy_rows

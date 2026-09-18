@@ -113,9 +113,20 @@ def _extract_nuxt_data_payload(html):
     return json.loads(match.group(1))
 
 
+def _find_nuxt_key(root, key_prefix):
+    if key_prefix in root:
+        return key_prefix
+    matches = [key for key in root if str(key).startswith(f"{key_prefix}-")]
+    if matches:
+        return matches[0]
+    return None
+
+
 def _find_nuxt_root(payload, required_keys):
-    for item in payload[:16]:
-        if isinstance(item, dict) and all(key in item for key in required_keys):
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        if all(_find_nuxt_key(item, key) for key in required_keys):
             return item
     raise ValueError(f"找不到 Nuxt root keys: {required_keys}")
 
@@ -191,7 +202,10 @@ def load_active_etf_summary():
     except ValueError:
         payload = _extract_nuxt_data_payload(html)
         root = _find_nuxt_root(payload, ["active-summary-weekly-0"])
-    decoded = _decode_nuxt_ref(payload, root["active-summary-weekly-0"])
+    summary_key = _find_nuxt_key(root, "active-summary-weekly-0")
+    if not summary_key:
+        raise ValueError("找不到 Nuxt root key: active-summary-weekly-0")
+    decoded = _decode_nuxt_ref(payload, root[summary_key])
     items = [item for item in decoded.get("etfs", []) if _is_target_active_etf(item)]
     return {
         "updated_at": decoded.get("updatedAt"),
@@ -220,8 +234,10 @@ def load_active_etf_detail(code):
                 f"etf-detail-base-{normalized_code}",
             ],
         )
-    detail_key = f"active-changes-{normalized_code}"
-    base_key = f"etf-detail-base-{normalized_code}"
+    detail_key = _find_nuxt_key(payload_root, f"active-changes-{normalized_code}")
+    base_key = _find_nuxt_key(payload_root, f"etf-detail-base-{normalized_code}")
+    if not detail_key or not base_key:
+        raise ValueError(f"找不到 Nuxt ETF detail keys: {normalized_code}")
     decoded_detail = _decode_nuxt_ref(payload, payload_root[detail_key])
     decoded_base = _decode_nuxt_ref(payload, payload_root[base_key])
     return {
@@ -776,8 +792,15 @@ def build_active_etf_detail_bundle(code):
     )
 
     has_foreign_holdings = bool(goalstar_info.get("has_foreign"))
-    backfill_goalstar_etf_history(normalized_code, holdings_df, days=30)
     history_summary_df = load_etf_change_snapshot_summaries(normalized_code)
+    should_backfill_history = history_summary_df.empty or len(history_summary_df) < 3
+    if should_backfill_history:
+        try:
+            backfill_goalstar_etf_history(normalized_code, holdings_df, days=30)
+            history_summary_df = load_etf_change_snapshot_summaries(normalized_code)
+        except Exception:
+            # 歷史回補只影響持股變動時間軸，不應拖垮 ETF 詳頁主流程。
+            pass
 
     overview = {
         "code": normalized_code,

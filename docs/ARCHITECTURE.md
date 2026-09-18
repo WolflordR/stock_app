@@ -1,155 +1,101 @@
-# Trade Lab Architecture Notes
+# Trade Lab Architecture
 
-## Editing Rule
+Trade Lab 的正式架構已改為 React + FastAPI + worker。舊 Streamlit UI 已移到 `archive/legacy_streamlit/`，只保留做歷史參考。
 
-- `main.py`
-  - Streamlit app entrypoint
-  - 負責主導航和頁面切換
+## Runtime Apps
 
-- `app_pages/`
-  - 頁面入口與 orchestration
-  - 想改頁面流程、版面組裝、頁面級互動，先看這裡
+- `apps/web/`
+  - Vite React + TypeScript 正式網站。
+  - 負責頁面、表格、K 線圖與互動。
+  - 只透過 HTTP API 取資料，不直接讀 DB 或 NAS 檔案。
 
-- `modules/`
-  - 真正的功能實作本體
-  - 想改資料整理、查詢、業務邏輯、共用 UI，優先改這裡
+- `apps/api/`
+  - FastAPI 後端。
+  - 對前端提供 `/api/...` read API 與背景任務啟動/查詢 API。
+  - 讀取 SQLite DB 和整理好的資料檔。
 
-## Current Structure
+- `apps/worker/`
+  - NAS 或本機排程執行的資料任務。
+  - 負責股價快取、券商分點 CSV 匯入、資料更新、備份。
 
-### App Entry
-
-- `main.py`
-
-### Page Layer
-
-- `app_pages/home_page.py`
-- `app_pages/industry_page.py`
-- `app_pages/market_map_page.py`
-- `app_pages/market_map_page_helpers.py`
-- `app_pages/research_page.py`
-- `app_pages/news_page.py`
-- `app_pages/stock_detail_page.py`
-- `app_pages/backtest_page.py`
-- `app_pages/active_etf_page.py`
-
-### Module Layer
+## Shared Modules
 
 - `modules/core/`
-  - `app_constants.py`
-  - `http_utils.py`
-  - `internal_nav.py`
-  - `persistent_cache.py`
-  - `project_paths.py`
-  - `trading_calendar.py`
+  - 設定、路徑、job store、job manager、HTTP helper。
 
 - `modules/data_sources/`
-  - `stock_db.py`
-  - `market_watch.py`
-  - `revenue_data.py`
-  - `broker_branch_data.py`
-  - `official_broker_import.py`
-  - `chip_data.py`
-  - `price_cache.py`
-
-- `modules/home/`
-  - `home_page_data.py`
-  - `home_page_sections.py`
-  - `homepage_brief.py`
-
-- `modules/etf/`
-  - `active_etf_watch.py`
-  - `active_etf_history_store.py`
-
-- `modules/market_map/`
-  - `market_map_db.py`
-  - `market_map_events.py`
-  - `market_map_queries.py`
-  - `market_map_snapshot_store.py`
-  - `market_map_taxonomy.py`
-  - `market_map_value_chain.py`
-
-- `modules/industry/`
-  - `industry_rotation.py`
-  - `industry_page_helpers.py`
-  - `industry_page_sections.py`
-  - `industry_taxonomy.py`
-  - `industry_utils.py`
-  - `classification_refresh.py`
-  - `classification_queries.py`
-  - `classification_exports.py`
-  - `company_links_db.py`
-
-- `modules/news/`
-  - `news_ai.py`
-  - `news_analysis.py`
-  - `news_common.py`
-  - `news_events.py`
-  - `news_market.py`
-
-- `modules/research/`
-  - `research_*`
-  - `transcript_*`
+  - 股票主檔、價格快取、法人資料、券商分點、ETF、營收等資料來源。
 
 - `modules/backtest/`
-  - `backtest_*`
-  - `strategy_*`
-  - `performance_metrics.py`
-  - `bowl_scoring.py`
-  - `func.py`
+  - 選股與回測邏輯。
 
-- `modules/ui/`
-  - `ui_*`
+- `modules/industry/`, `modules/market_map/`, `modules/news/`, `modules/research/`
+  - 可重用的資料整理、分類、新聞與研究邏輯。
 
-## Root Now Intentionally Small
+- `packages/`
+  - 跨 app 共用的資料檔清單與未來 domain package。
 
-repo root 現在主要只留：
+## Data Layout
 
-- app 入口：`main.py`
-- 頁面資料夾：`app_pages/`
-- 功能模組：`modules/`
-- 部署 / 腳本 / web beta：`deploy/`, `scripts/`, `web_app/`
-- 文件與設定：`docs/`, `.streamlit/`
-- 資料與快取：`data/`
+NAS 上建議使用：
 
-## Documents
+```text
+/volume1/trade/
+  data/
+    db/
+    raw/
+    processed/
+    cache/
+  logs/
+  backups/
+```
 
-- `docs/ARCHITECTURE.md`
-- `docs/CODEBASE_MAP.md`
-- `docs/DEPLOYMENT.md`
-- `docs/FIX_BACKLOG.md`
+程式透過環境變數切換本機或 NAS：
 
-這樣多人協作時，不需要再從 root 滿滿同名檔案裡猜哪個才是真的實作。
+```text
+TRADE_NAS_ROOT=/volume1/trade
+TRADE_DATA_DIR=/volume1/trade/data
+TRADE_DB_DIR=/volume1/trade/data/db
+TRADE_RAW_DATA_DIR=/volume1/trade/data/raw
+```
 
-## Collaboration Guidance
+## Data Flow
 
-- 想改 ETF：
-  - 頁面流程看 `app_pages/active_etf_page.py`
-  - 資料邏輯看 `modules/etf/`
+```text
+worker -> raw/processed/cache/db -> FastAPI -> React web
+```
 
-- 想改首頁：
-  - `app_pages/home_page.py`
-  - `modules/home/`
-  - `modules/ui/`
+API 原則上負責讀資料；worker 是主要寫入者。這樣 SQLite 放在 NAS 上會比較穩。
 
-- 想改產業地圖：
-  - 頁面流程看 `app_pages/market_map_page.py`
-  - UI 細節看 `app_pages/market_map_page_helpers.py`
-  - 資料邏輯看 `modules/market_map/`
+## Development
 
-- 想改舊產業輪動：
-  - `app_pages/industry_page.py`
-  - `modules/industry/`
+Local development:
 
-- 想改研究 / transcript：
-  - `app_pages/research_page.py`
-  - `modules/research/`
+```bash
+make api
+make web
+```
 
-- 想改回測：
-  - `app_pages/backtest_page.py`
-  - `modules/backtest/`
+NAS-style local test:
 
-- 想改共用資料來源：
-  - `modules/data_sources/`
+```bash
+TRADE_NAS_ENV_FILE=.env.nas.example scripts/check_nas_dry_run.sh
+```
 
-- 想改共用工具與導航：
-  - `modules/core/`
+Docker/NAS deployment:
+
+```bash
+scripts/init_nas_data.sh
+scripts/nas_compose_up.sh
+scripts/nas_health_check.sh
+```
+
+## Legacy Code
+
+舊 Streamlit UI 放在：
+
+```text
+archive/legacy_streamlit/
+```
+
+這些檔案不再參與正式部署，也不應該被新功能引用。若要找舊版頁面行為，可從 archive 讀設計與流程，再搬成 React/API 實作。

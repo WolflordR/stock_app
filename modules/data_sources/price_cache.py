@@ -2,13 +2,16 @@ import sqlite3
 import io
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import yfinance as yf
 
-from modules.core.project_paths import data_path
+from modules.core.project_paths import db_path
 
-DB_PATH = data_path("price_cache.db")
+DB_PATH = db_path("price_cache.db")
+TAIPEI_TZ = ZoneInfo("Asia/Taipei")
+TAIWAN_DAILY_PRICE_CONFIRM_HOUR = 18
 META_COLUMN_DEFINITIONS = {
     "first_cached_date": "TEXT",
     "last_cached_date": "TEXT",
@@ -42,6 +45,26 @@ def _format_date(value):
 def _max_date_str(*values):
     parsed = [ts for ts in (_parse_date(value) for value in values) if ts is not None]
     return _format_date(max(parsed)) if parsed else None
+
+
+def _is_taiwan_symbol(symbol: str) -> bool:
+    normalized = str(symbol or "").upper()
+    return normalized.endswith(".TW") or normalized.endswith(".TWO")
+
+
+def _current_taipei_timestamp() -> pd.Timestamp:
+    return pd.Timestamp(datetime.now(TAIPEI_TZ)).tz_localize(None)
+
+
+def _latest_safe_request_end(symbol: str, request_end: pd.Timestamp) -> pd.Timestamp:
+    if not _is_taiwan_symbol(symbol):
+        return request_end
+    now = _current_taipei_timestamp()
+    today = now.normalize()
+    confirm_at = today + timedelta(hours=TAIWAN_DAILY_PRICE_CONFIRM_HOUR)
+    if now < confirm_at:
+        return min(request_end, today)
+    return request_end
 
 
 def init_price_cache():
@@ -377,6 +400,18 @@ def get_price_cache_status(symbol):
     }
 
 
+def clear_price_cache_status(symbol):
+    """清掉指定商品的快取狀態，讓下一次更新能重新嘗試抓取。"""
+    init_price_cache()
+    with _get_connection() as conn:
+        cursor = conn.execute(
+            "DELETE FROM price_cache_meta WHERE symbol = ?",
+            (symbol,),
+        )
+        conn.commit()
+        return int(cursor.rowcount or 0)
+
+
 def fetch_price_history(
     symbol,
     mode="即時選股",
@@ -397,6 +432,7 @@ def fetch_price_history(
         else:
             request_end = pd.Timestamp.today().normalize() + timedelta(days=1)
         request_start = request_end - timedelta(days=max(history_buffer_days, 120))
+    request_end = _latest_safe_request_end(symbol, request_end)
 
     meta = _ensure_symbol_meta_current(symbol) or {}
     last_updated_at = _parse_date(meta.get("last_updated_at"))

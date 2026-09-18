@@ -47,6 +47,15 @@ class BacktestScanRequest:
     vcp_breakout_volume_ratio: float = 1.0
     vcp_near_pivot_tolerance_pct: float = 12.0
     vcp_max_consolidation_depth_pct: float = 45.0
+    pullback_strong_lookback_days: int = 20
+    pullback_min_pullback_pct: float = 10.0
+    pullback_base_hold_days: int = 3
+    pullback_low_price_volume_price_threshold: float = 500.0
+    pullback_low_price_min_volume_lots: float = 700.0
+    pullback_technology_only: bool = True
+    high_price_pullback_lookback_days: int = 20
+    high_price_pullback_market_cap_rank_limit: int = 50
+    high_price_pullback_min_drop_pct: float = 15.0
 
     @classmethod
     def from_sidebar_state(cls, state: dict[str, Any]) -> "BacktestScanRequest":
@@ -91,6 +100,15 @@ class BacktestScanRequest:
             vcp_breakout_volume_ratio=float(state["vcp_breakout_volume_ratio"]),
             vcp_near_pivot_tolerance_pct=float(state["vcp_near_pivot_tolerance_pct"]),
             vcp_max_consolidation_depth_pct=float(state["vcp_max_consolidation_depth_pct"]),
+            pullback_strong_lookback_days=int(state["pullback_strong_lookback_days"]),
+            pullback_min_pullback_pct=float(state["pullback_min_pullback_pct"]),
+            pullback_base_hold_days=int(state["pullback_base_hold_days"]),
+            pullback_low_price_volume_price_threshold=float(state["pullback_low_price_volume_price_threshold"]),
+            pullback_low_price_min_volume_lots=float(state["pullback_low_price_min_volume_lots"]),
+            pullback_technology_only=bool(state["pullback_technology_only"]),
+            high_price_pullback_lookback_days=int(state["high_price_pullback_lookback_days"]),
+            high_price_pullback_market_cap_rank_limit=int(state["high_price_pullback_market_cap_rank_limit"]),
+            high_price_pullback_min_drop_pct=float(state["high_price_pullback_min_drop_pct"]),
         )
 
     def to_engine_kwargs(self) -> dict[str, Any]:

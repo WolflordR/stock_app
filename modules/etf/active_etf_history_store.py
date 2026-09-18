@@ -5,10 +5,10 @@ from datetime import date, timedelta
 
 import pandas as pd
 
-from modules.core.project_paths import data_path
+from modules.core.project_paths import db_path
 
 
-DB_PATH = data_path("active_etf_history.db")
+DB_PATH = db_path("active_etf_history.db")
 
 
 def _connect():

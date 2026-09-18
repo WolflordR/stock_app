@@ -1,59 +1,31 @@
-# 修正清單
+# Fix Backlog
 
-以下是目前專案最值得優先處理的修正項目，按照「先穩定、再加速、再搬前端」排序。
+這份清單以目前正式架構為準：React web + FastAPI API + worker + NAS data folder。
 
-## P0 先穩定跑
+## P0 Deployment Stability
 
-1. `主站切頁不應重跑資料`
-   - 首頁與主動 ETF 已經開始改成背景任務 + cache loader
-   - 下一步是把相同模式擴到產業地圖、個股詳頁、研究頁常用資料
+1. Confirm real NAS path in `.env.nas`.
+2. Run `scripts/init_nas_data.sh`.
+3. Run `scripts/nas_compose_up.sh`.
+4. Run `scripts/nas_health_check.sh`.
+5. Confirm browser can open `http://<NAS-IP>:8080`.
 
-2. `所有內部導航都要留在同一個 app 分頁`
-   - 已建立 `internal_nav.py`
-   - 已改主動 ETF、產業地圖、個股入口
-   - 下一步是把其他內部入口全部收斂到同一套 helper
+## P1 Data Pipeline
 
-3. `首頁不應因 fallback 同步重算而卡住`
-   - 已移除最重的同步 fallback
-   - 下一步要觀察還有哪些 background job 沒完成前會導致體感卡頓
+1. Add a web-triggered broker CSV import job.
+2. Add scheduled daily DB backup on NAS.
+3. Add price cache update presets for common scopes.
+4. Add import logs for broker CSV batches.
 
-## P1 資料快取與持久化
+## P2 Product Pages
 
-4. `首頁摘要需要落地快照`
-   - 現在多數是 process cache
-   - 建議補成 sqlite snapshot，避免重開服務後又重算
+1. Improve stock detail broker branch table with multi-day controls.
+2. Improve ETF snapshot date picker and empty-state text.
+3. Expand strong-stock ranking filters.
+4. Replace mock US economic calendar with a real source.
 
-5. `主動 ETF 歷史快照要更完整`
-   - 台股型 ETF 已能近 30 日
-   - 全球型 ETF 目前受限於外部來源，只能補公開拿得到的日期
-   - 需要再找第二資料源或做缺資料日期的 UI 表達
+## P3 Cleanup
 
-6. `產業地圖快照要延續現在的 snapshot 模式`
-   - 現在方向正確
-   - 下一步是讓更多題材 detail payload 直接讀 snapshot，而不是頁面內再組
-
-## P2 前端遷移
-
-7. `HTML beta 先完整搬主動 ETF`
-   - `web_app/` 骨架已建立
-   - 下一步搬 `主動ETF detail` 的三個主 tab
-
-8. `產業地圖搬到 HTML`
-   - 第二個搬運目標
-   - 先搬 overview + detail + heatmap
-
-9. `個股詳頁搬到 HTML`
-   - 第三階段
-   - 等 API 介面穩定後再搬
-
-## P3 結構整理
-
-10. `把頁面自管 query/session 更新逐步抽乾淨`
-    - 避免每頁自己 patch `st.query_params`
-
-11. `把共用資料 loader 集中到 ui_data / api 層`
-    - 減少頁面直接碰底層抓資料函式
-
-12. `把 run / deploy 指令標準化`
-    - 已新增 `scripts/run_streamlit.sh`
-    - 已新增 `scripts/run_web_beta.sh`
+1. Move more shared logic from `modules/` into `packages/`.
+2. Remove archived Streamlit code after all behavior is fully covered by React/API.
+3. Split API read models into smaller files once endpoints stabilize.

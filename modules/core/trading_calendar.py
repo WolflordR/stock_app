@@ -47,6 +47,14 @@ def resolve_recent_trade_date(requested_date, max_lookback_days=14):
     }
 
 
+def resolve_after_hours_trade_date(current_ts=None, cutoff_hour=18, max_lookback_days=14):
+    current_ts = pd.to_datetime(current_ts or pd.Timestamp.now())
+    anchor_ts = current_ts.normalize()
+    if int(current_ts.hour) < int(cutoff_hour):
+        anchor_ts -= pd.Timedelta(days=1)
+    return resolve_recent_trade_date(anchor_ts, max_lookback_days=max_lookback_days)
+
+
 def resolve_trade_dates_in_range(start_date, end_date, max_lookback_days=14):
     start_ts = pd.to_datetime(start_date)
     end_ts = pd.to_datetime(end_date)
