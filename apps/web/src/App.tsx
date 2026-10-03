@@ -1008,7 +1008,7 @@ function StockView({
 }
 
 function MonthlyRevenueTable({ rows }: { rows: StockOverview["monthly_revenue"] }) {
-  const pageSize = 6;
+  const pageSize = 12;
   const [startIndex, setStartIndex] = useState(0);
   const maxStartIndex = Math.max(0, rows.length - pageSize);
   const effectiveStartIndex = Math.min(startIndex, maxStartIndex);
@@ -1021,10 +1021,7 @@ function MonthlyRevenueTable({ rows }: { rows: StockOverview["monthly_revenue"] 
     setStartIndex(0);
   }, [rows]);
 
-  const sparkValues = [...visibleRows]
-    .reverse()
-    .map((row) => Number(row.current_revenue ?? 0))
-    .filter((value) => value > 0);
+  const chartRows = [...visibleRows].reverse();
   return (
     <div className="stock-revenue-block">
       <div className="stock-revenue-summary">
@@ -1039,7 +1036,6 @@ function MonthlyRevenueTable({ rows }: { rows: StockOverview["monthly_revenue"] 
           >
             <ChevronLeft size={16} />
           </button>
-          <Sparkline values={sparkValues} rising={(visibleRows[0]?.yoy_pct ?? 0) >= 0} />
           <button
             type="button"
             aria-label="較舊月份"
@@ -1051,6 +1047,7 @@ function MonthlyRevenueTable({ rows }: { rows: StockOverview["monthly_revenue"] 
           </button>
         </div>
       </div>
+      <RevenueBarChart rows={chartRows} />
       <div className="dense-table stock-revenue-table">
         <div className="dense-row table-header" aria-hidden="true">
           <span>月份</span>
@@ -1069,6 +1066,28 @@ function MonthlyRevenueTable({ rows }: { rows: StockOverview["monthly_revenue"] 
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function RevenueBarChart({ rows }: { rows: StockOverview["monthly_revenue"] }) {
+  const values = rows.map((row) => Number(row.current_revenue ?? 0));
+  const maxValue = Math.max(...values, 1);
+  return (
+    <div className="stock-revenue-bars" aria-label="月營收柱狀圖">
+      {rows.map((row) => {
+        const value = Number(row.current_revenue ?? 0);
+        const heightPct = Math.max(5, Math.round((value / maxValue) * 100));
+        return (
+          <div className="stock-revenue-bar-item" key={`${row.market}-${row.code}-${row.report_month}-bar`}>
+            <span>{formatLargeAmount(row.current_revenue)}</span>
+            <div className="stock-revenue-bar-track">
+              <div className={`stock-revenue-bar ${toneClass(row.yoy_pct)}`} style={{ height: `${heightPct}%` }} />
+            </div>
+            <strong>{formatShortMonth(row.report_month)}</strong>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -2581,6 +2600,13 @@ function formatPct(value: number | null | undefined) {
 function formatLargeAmount(value: number | null | undefined) {
   if (value === null || value === undefined) return "-";
   return `${(value / 100000).toLocaleString(undefined, { maximumFractionDigits: 1 })} 億`;
+}
+
+function formatShortMonth(value: string | null | undefined) {
+  if (!value) return "-";
+  const parts = value.split("-");
+  if (parts.length >= 2) return `${Number(parts[1])}月`;
+  return value;
 }
 
 function formatVolume(value: number | null | undefined) {

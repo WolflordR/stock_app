@@ -1334,6 +1334,62 @@ h1 {
   opacity: 0.42;
 }
 
+.stock-revenue-bars {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  align-items: end;
+  gap: 8px;
+  min-height: 150px;
+  padding: 10px 10px 8px;
+  border: 1px solid rgba(236, 241, 244, 0.08);
+  border-radius: 8px;
+  background: rgba(19, 23, 34, 0.62);
+}
+
+.stock-revenue-bar-item {
+  display: grid;
+  grid-template-rows: auto 96px auto;
+  gap: 5px;
+  min-width: 0;
+  align-items: end;
+  text-align: center;
+}
+
+.stock-revenue-bar-item span,
+.stock-revenue-bar-item strong {
+  overflow: hidden;
+  color: #aeb8be;
+  font-size: 0.66rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stock-revenue-bar-track {
+  display: flex;
+  align-items: end;
+  justify-content: center;
+  height: 96px;
+  min-width: 0;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.035);
+  overflow: hidden;
+}
+
+.stock-revenue-bar {
+  width: 72%;
+  min-height: 4px;
+  border-radius: 6px 6px 0 0;
+  background: #aeb8be;
+}
+
+.stock-revenue-bar.up {
+  background: linear-gradient(180deg, #ff9f9f, #d85866);
+}
+
+.stock-revenue-bar.down {
+  background: linear-gradient(180deg, #6fe7c5, #2aa889);
+}
+
 .stock-revenue-table .dense-row {
   grid-template-columns: 82px minmax(86px, 1fr) 72px 72px 86px;
 }

@@ -1165,6 +1165,6 @@ def build_stock_overview(stock_id: str) -> dict[str, Any]:
             "quotes": quotes,
             "broker_summary": broker_payload,
             "institutional_trading": list_stock_institutional_history(stock_code, market=market, limit=20),
-            "monthly_revenue": list_stock_monthly_revenue(stock_code, limit=12),
+            "monthly_revenue": list_stock_monthly_revenue(stock_code, limit=36),
         }
     )
