@@ -1306,6 +1306,34 @@ h1 {
   font-weight: 800;
 }
 
+.stock-revenue-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stock-revenue-controls button {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgba(236, 241, 244, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.045);
+  color: #ecf1f4;
+  cursor: pointer;
+}
+
+.stock-revenue-controls button:not(:disabled):hover {
+  border-color: rgba(111, 231, 197, 0.36);
+  background: rgba(111, 231, 197, 0.14);
+}
+
+.stock-revenue-controls button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
 .stock-revenue-table .dense-row {
   grid-template-columns: 82px minmax(86px, 1fr) 72px 72px 86px;
 }

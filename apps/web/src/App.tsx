@@ -1008,15 +1008,48 @@ function StockView({
 }
 
 function MonthlyRevenueTable({ rows }: { rows: StockOverview["monthly_revenue"] }) {
-  const sparkValues = [...rows]
+  const pageSize = 6;
+  const [startIndex, setStartIndex] = useState(0);
+  const maxStartIndex = Math.max(0, rows.length - pageSize);
+  const effectiveStartIndex = Math.min(startIndex, maxStartIndex);
+  const visibleRows = rows.slice(effectiveStartIndex, effectiveStartIndex + pageSize);
+  const periodLabel = visibleRows.length
+    ? `${visibleRows[visibleRows.length - 1]?.report_month} 到 ${visibleRows[0]?.report_month}`
+    : "尚無月份";
+
+  useEffect(() => {
+    setStartIndex(0);
+  }, [rows]);
+
+  const sparkValues = [...visibleRows]
     .reverse()
     .map((row) => Number(row.current_revenue ?? 0))
     .filter((value) => value > 0);
   return (
     <div className="stock-revenue-block">
       <div className="stock-revenue-summary">
-        <span>近 {rows.length} 個月</span>
-        <Sparkline values={sparkValues} rising={(rows[0]?.yoy_pct ?? 0) >= 0} />
+        <span>{periodLabel}</span>
+        <div className="stock-revenue-controls">
+          <button
+            type="button"
+            aria-label="較新月份"
+            title="較新月份"
+            onClick={() => setStartIndex((current) => Math.max(0, current - pageSize))}
+            disabled={effectiveStartIndex === 0}
+          >
+            <ChevronLeft size={16} />
+          </button>
+          <Sparkline values={sparkValues} rising={(visibleRows[0]?.yoy_pct ?? 0) >= 0} />
+          <button
+            type="button"
+            aria-label="較舊月份"
+            title="較舊月份"
+            onClick={() => setStartIndex((current) => Math.min(maxStartIndex, current + pageSize))}
+            disabled={effectiveStartIndex >= maxStartIndex}
+          >
+            <ChevronRight size={16} />
+          </button>
+        </div>
       </div>
       <div className="dense-table stock-revenue-table">
         <div className="dense-row table-header" aria-hidden="true">
@@ -1026,7 +1059,7 @@ function MonthlyRevenueTable({ rows }: { rows: StockOverview["monthly_revenue"] 
           <span>年增</span>
           <span>累計年增</span>
         </div>
-        {rows.map((row) => (
+        {visibleRows.map((row) => (
           <div className="dense-row" key={`${row.market}-${row.code}-${row.report_month}`}>
             <strong>{row.report_month}</strong>
             <span>{formatLargeAmount(row.current_revenue)}</span>
