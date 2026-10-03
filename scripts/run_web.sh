@@ -6,4 +6,4 @@ HOST="${TRADE_WEB_HOST:-127.0.0.1}"
 PORT="${TRADE_WEB_PORT:-5173}"
 
 cd "${PROJECT_ROOT}/apps/web"
-exec npm run dev -- --host "${HOST}" --port "${PORT}"
+exec npx vite --host "${HOST}" --port "${PORT}"
