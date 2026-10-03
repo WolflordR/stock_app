@@ -144,8 +144,8 @@ def build_dashboard_overview_payload() -> dict[str, object]:
 
 if app is not None:
     class BacktestStartRequest(BaseModel):
-        start_num: int = Field(default=2330, ge=0, le=9999)
-        end_num: int = Field(default=2335, ge=0, le=9999)
+        start_num: int = Field(default=0, ge=0, le=9999)
+        end_num: int = Field(default=9999, ge=0, le=9999)
         mode: str = "即時選股"
         selected_strategies: list[str] = Field(default_factory=lambda: ["強勢股回檔量縮止跌"])
         selected_sell_strategies: list[str] = Field(default_factory=list)

@@ -223,8 +223,8 @@ export function App() {
   const [backtestConfig, setBacktestConfig] = useState<BacktestConfig | null>(null);
   const [backtestJob, setBacktestJob] = useState<BacktestJob | null>(null);
   const [backtestStarting, setBacktestStarting] = useState(false);
-  const [backtestStart, setBacktestStart] = useState(2330);
-  const [backtestEnd, setBacktestEnd] = useState(2335);
+  const [backtestStart, setBacktestStart] = useState(0);
+  const [backtestEnd, setBacktestEnd] = useState(9999);
   const [backtestMode, setBacktestMode] = useState("即時選股");
   const [backtestBuyStrategy, setBacktestBuyStrategy] = useState("強勢股回檔量縮止跌");
   const [backtestParams, setBacktestParams] = useState<BacktestTuningParams>(defaultBacktestParams);
