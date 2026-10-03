@@ -63,9 +63,9 @@ class BacktestScanRequest:
     breakout_volume_long_window: int = 20
     bowl_volume_lookback_days: int = 120
     bowl_volume_min_drawdown_pct: float = 20.0
-    bowl_volume_short_window: int = 5
-    bowl_volume_long_window: int = 20
-    bowl_volume_min_volume_ratio: float = 1.2
+    bowl_volume_volume_lookback_days: int = 20
+    bowl_volume_signal_window_days: int = 3
+    bowl_volume_multiplier: float = 2.0
     bowl_volume_trend_lookback_days: int = 10
 
     @classmethod
@@ -127,9 +127,9 @@ class BacktestScanRequest:
             breakout_volume_long_window=int(state.get("breakout_volume_long_window", 20)),
             bowl_volume_lookback_days=int(state.get("bowl_volume_lookback_days", 120)),
             bowl_volume_min_drawdown_pct=float(state.get("bowl_volume_min_drawdown_pct", 20.0)),
-            bowl_volume_short_window=int(state.get("bowl_volume_short_window", 5)),
-            bowl_volume_long_window=int(state.get("bowl_volume_long_window", 20)),
-            bowl_volume_min_volume_ratio=float(state.get("bowl_volume_min_volume_ratio", 1.2)),
+            bowl_volume_volume_lookback_days=int(state.get("bowl_volume_volume_lookback_days", 20)),
+            bowl_volume_signal_window_days=int(state.get("bowl_volume_signal_window_days", 3)),
+            bowl_volume_multiplier=float(state.get("bowl_volume_multiplier", 2.0)),
             bowl_volume_trend_lookback_days=int(state.get("bowl_volume_trend_lookback_days", 10)),
         )
 

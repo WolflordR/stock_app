@@ -184,9 +184,9 @@ if app is not None:
         breakout_volume_long_window: int = Field(default=20, ge=2, le=120)
         bowl_volume_lookback_days: int = Field(default=120, ge=60, le=260)
         bowl_volume_min_drawdown_pct: float = Field(default=20.0, ge=1, le=80)
-        bowl_volume_short_window: int = Field(default=5, ge=1, le=60)
-        bowl_volume_long_window: int = Field(default=20, ge=2, le=120)
-        bowl_volume_min_volume_ratio: float = Field(default=1.2, ge=0.1, le=10)
+        bowl_volume_volume_lookback_days: int = Field(default=20, ge=2, le=120)
+        bowl_volume_signal_window_days: int = Field(default=3, ge=1, le=10)
+        bowl_volume_multiplier: float = Field(default=2.0, ge=0.1, le=20)
         bowl_volume_trend_lookback_days: int = Field(default=10, ge=3, le=120)
 
         def to_scan_request(self) -> BacktestScanRequest:
@@ -233,9 +233,9 @@ if app is not None:
                 breakout_volume_long_window=self.breakout_volume_long_window,
                 bowl_volume_lookback_days=self.bowl_volume_lookback_days,
                 bowl_volume_min_drawdown_pct=self.bowl_volume_min_drawdown_pct,
-                bowl_volume_short_window=self.bowl_volume_short_window,
-                bowl_volume_long_window=self.bowl_volume_long_window,
-                bowl_volume_min_volume_ratio=self.bowl_volume_min_volume_ratio,
+                bowl_volume_volume_lookback_days=self.bowl_volume_volume_lookback_days,
+                bowl_volume_signal_window_days=self.bowl_volume_signal_window_days,
+                bowl_volume_multiplier=self.bowl_volume_multiplier,
                 bowl_volume_trend_lookback_days=self.bowl_volume_trend_lookback_days,
             )
 

@@ -199,9 +199,9 @@ export type BacktestStartPayload = {
   breakout_volume_long_window?: number;
   bowl_volume_lookback_days?: number;
   bowl_volume_min_drawdown_pct?: number;
-  bowl_volume_short_window?: number;
-  bowl_volume_long_window?: number;
-  bowl_volume_min_volume_ratio?: number;
+  bowl_volume_volume_lookback_days?: number;
+  bowl_volume_signal_window_days?: number;
+  bowl_volume_multiplier?: number;
   bowl_volume_trend_lookback_days?: number;
 };
 

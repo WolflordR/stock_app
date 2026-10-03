@@ -10,8 +10,14 @@ BOWL_LOOKBACK_DAYS = 120
 MIN_DRAWDOWN = 0.20
 VOLUME_SHORT_WINDOW = 5
 VOLUME_LONG_WINDOW = 20
-BOWL_MIN_VOLUME_RATIO = 1.2
+BOWL_VOLUME_LOOKBACK_DAYS = 20
+BOWL_VOLUME_SIGNAL_WINDOW = 3
+BOWL_VOLUME_MULTIPLIER = 2.0
 BOWL_TREND_LOOKBACK_DAYS = 10
+BOWL_MIN_RECOVERY_FROM_BOTTOM = 0.08
+BOWL_BOTTOM_ZONE_PCT = 0.12
+BOWL_MIN_BOTTOM_DAYS = 3
+BOWL_MIN_BOTTOM_SPAN_DAYS = 5
 
 
 def _clean_ohlcv(df: pd.DataFrame, *, required_length: int) -> pd.DataFrame | None:
@@ -39,6 +45,62 @@ def _safe_ratio(numerator: float, denominator: float) -> float | None:
     if denominator <= 0:
         return None
     return numerator / denominator
+
+
+def _find_recent_volume_signal(
+    window: pd.DataFrame,
+    *,
+    volume_lookback_days: int,
+    signal_window_days: int,
+    volume_multiplier: float,
+) -> dict[str, object] | None:
+    volume_lookback_days = max(2, int(volume_lookback_days))
+    signal_window_days = max(1, int(signal_window_days))
+    volume_multiplier = max(0.1, float(volume_multiplier))
+    candidates: list[dict[str, object]] = []
+    start_pos = max(1, len(window) - signal_window_days)
+
+    for pos in range(start_pos, len(window)):
+        if pos < volume_lookback_days:
+            continue
+        avg_volume = float(window["Volume"].iloc[pos - volume_lookback_days : pos].mean())
+        current_volume = float(window["Volume"].iloc[pos])
+        previous_close = float(window["Close"].iloc[pos - 1])
+        current_close = float(window["Close"].iloc[pos])
+        volume_ratio = _safe_ratio(current_volume, avg_volume) or 0.0
+        price_change_pct = ((current_close / previous_close) - 1.0) * 100 if previous_close > 0 else 0.0
+        if volume_ratio >= volume_multiplier and current_close > previous_close:
+            candidates.append({
+                "volume_signal_date": _date_text(window.index[pos]),
+                "volume_signal_pos": pos,
+                "volume_signal_volume": round(current_volume),
+                "volume_signal_avg_volume_20d": round(avg_volume),
+                "volume_signal_ratio": round(volume_ratio, 2),
+                "volume_signal_price_change_pct": round(price_change_pct, 2),
+                "days_since_volume_signal": len(window) - 1 - pos,
+            })
+
+    if not candidates:
+        return None
+    return max(candidates, key=lambda item: float(item["volume_signal_ratio"]))
+
+
+def _has_bottom_base(window: pd.DataFrame, *, low_pos: int, subsequent_low: float) -> tuple[bool, dict[str, int]]:
+    right_side = window.iloc[low_pos:].copy()
+    if right_side.empty or subsequent_low <= 0:
+        return False, {"bottom_days": 0, "bottom_span_days": 0}
+
+    bottom_band = subsequent_low * (1.0 + BOWL_BOTTOM_ZONE_PCT)
+    bottom_positions = [low_pos + offset for offset, value in enumerate(right_side["Close"]) if float(value) <= bottom_band]
+    if not bottom_positions:
+        return False, {"bottom_days": 0, "bottom_span_days": 0}
+
+    bottom_days = len(bottom_positions)
+    bottom_span_days = bottom_positions[-1] - bottom_positions[0] + 1
+    return (
+        bottom_days >= BOWL_MIN_BOTTOM_DAYS and bottom_span_days >= BOWL_MIN_BOTTOM_SPAN_DAYS,
+        {"bottom_days": bottom_days, "bottom_span_days": bottom_span_days},
+    )
 
 
 def analyze_near_breakout_candidate(
@@ -141,20 +203,21 @@ def analyze_bowl_bottom_volume_candidate(
     *,
     lookback_days: int = BOWL_LOOKBACK_DAYS,
     min_drawdown: float = MIN_DRAWDOWN,
-    volume_short_window: int = VOLUME_SHORT_WINDOW,
-    volume_long_window: int = VOLUME_LONG_WINDOW,
-    min_volume_ratio: float = BOWL_MIN_VOLUME_RATIO,
+    volume_lookback_days: int = BOWL_VOLUME_LOOKBACK_DAYS,
+    volume_signal_window_days: int = BOWL_VOLUME_SIGNAL_WINDOW,
+    volume_multiplier: float = BOWL_VOLUME_MULTIPLIER,
     trend_lookback_days: int = BOWL_TREND_LOOKBACK_DAYS,
 ) -> dict[str, object] | None:
-    required_length = max(lookback_days, volume_long_window + trend_lookback_days + 5, 60)
+    required_length = max(lookback_days, volume_lookback_days + volume_signal_window_days + 5, trend_lookback_days + 30, 60)
     cleaned = _clean_ohlcv(df, required_length=required_length)
     if cleaned is None:
         return None
 
     lookback_days = max(60, int(lookback_days))
     trend_lookback_days = max(3, int(trend_lookback_days))
-    volume_short_window = max(1, int(volume_short_window))
-    volume_long_window = max(volume_short_window + 1, int(volume_long_window))
+    volume_lookback_days = max(2, int(volume_lookback_days))
+    volume_signal_window_days = max(1, int(volume_signal_window_days))
+    volume_multiplier = max(0.1, float(volume_multiplier))
 
     window = cleaned.tail(lookback_days).copy()
     high_idx = window["High"].idxmax()
@@ -181,13 +244,17 @@ def analyze_bowl_bottom_volume_candidate(
     if drawdown < min_drawdown:
         return None
 
+    bottom_ok, bottom_stats = _has_bottom_base(window, low_pos=low_pos, subsequent_low=subsequent_low)
+    if not bottom_ok:
+        return None
+
     close_series = window["Close"]
     trend_reference = float(close_series.iloc[-(trend_lookback_days + 1)])
     recent_trend_pct = ((latest_close / trend_reference) - 1.0) * 100 if trend_reference > 0 else 0.0
     recovery_from_bottom_pct = ((latest_close / subsequent_low) - 1.0) * 100
     recover_to_high_pct = ((latest_close / half_year_high) - 1.0) * 100
 
-    if recent_trend_pct <= 0 or recovery_from_bottom_pct < 8.0:
+    if recent_trend_pct <= 0 or recovery_from_bottom_pct < BOWL_MIN_RECOVERY_FROM_BOTTOM * 100:
         return None
 
     ma5 = float(close_series.rolling(5).mean().iloc[-1])
@@ -198,13 +265,16 @@ def analyze_bowl_bottom_volume_candidate(
     if latest_close < ma5 or latest_close < ma20 * 0.96:
         return None
 
-    avg_volume_short = float(window["Volume"].tail(volume_short_window).mean())
-    avg_volume_long = float(window["Volume"].tail(volume_long_window).mean())
-    volume_ratio = _safe_ratio(avg_volume_short, avg_volume_long) or 0.0
-    if volume_ratio < min_volume_ratio:
+    volume_signal = _find_recent_volume_signal(
+        window,
+        volume_lookback_days=volume_lookback_days,
+        signal_window_days=volume_signal_window_days,
+        volume_multiplier=volume_multiplier,
+    )
+    if not volume_signal:
         return None
 
-    recent = window.tail(max(10, volume_short_window * 2)).copy()
+    recent = window.tail(max(10, volume_signal_window_days + volume_lookback_days // 2)).copy()
     up_days = recent[recent["Close"] >= recent["Open"]]
     down_days = recent[recent["Close"] < recent["Open"]]
     up_volume_avg = float(up_days["Volume"].mean()) if not up_days.empty else 0.0
@@ -213,6 +283,8 @@ def analyze_bowl_bottom_volume_candidate(
     if up_down_volume_ratio < 0.9:
         return None
 
+    avg_volume_short = float(window["Volume"].tail(volume_signal_window_days).mean())
+
     left_leg_days = low_pos - high_pos
     right_leg_days = len(window) - 1 - low_pos
     shape_balance = min(left_leg_days, right_leg_days) / max(left_leg_days, right_leg_days)
@@ -220,13 +292,15 @@ def analyze_bowl_bottom_volume_candidate(
     drawdown_score = min(20.0, (drawdown - min_drawdown) / 0.25 * 20.0 + 8.0)
     recovery_score = min(25.0, recovery_from_bottom_pct / 35.0 * 25.0)
     trend_score = min(15.0, max(0.0, recent_trend_pct / 12.0 * 15.0) + (5.0 if ma20_slope_pct >= 0 else 0.0))
-    volume_score = min(25.0, (volume_ratio - min_volume_ratio) / max(min_volume_ratio, 0.1) * 18.0 + 7.0)
+    volume_ratio = float(volume_signal["volume_signal_ratio"])
+    volume_score = min(25.0, (volume_ratio - volume_multiplier) / max(volume_multiplier, 0.1) * 18.0 + 12.0)
     score = round(max(0.0, min(100.0, structure_score + drawdown_score + recovery_score + trend_score + volume_score)), 1)
 
     positive_reasons = [
         f"近 {lookback_days} 日高點後最大跌幅 {drawdown * 100:.1f}%，符合先跌出底部的條件",
+        f"低檔區停留 {bottom_stats['bottom_days']} 天、橫跨 {bottom_stats['bottom_span_days']} 天，排除單日急彈",
         f"低點後反彈 {recovery_from_bottom_pct:.1f}%，近 {trend_lookback_days} 日再上漲 {recent_trend_pct:.1f}%",
-        f"{volume_short_window}日均量 / {volume_long_window}日均量 = {volume_ratio:.2f}x",
+        f"{volume_signal['volume_signal_date']} 放量上漲 {volume_ratio:.2f}x，漲幅 {volume_signal['volume_signal_price_change_pct']:.1f}%",
     ]
     if up_down_volume_ratio >= 1.0:
         positive_reasons.append(f"近期紅K日均量高於黑K日 {up_down_volume_ratio:.2f}x")
@@ -249,13 +323,24 @@ def analyze_bowl_bottom_volume_candidate(
         "recovery_from_bottom_pct": round(recovery_from_bottom_pct, 2),
         "recover_to_high_pct": round(recover_to_high_pct, 2),
         "avg_volume_short": round(avg_volume_short),
-        "avg_volume_long": round(avg_volume_long),
+        "avg_volume_long": round(volume_signal["volume_signal_avg_volume_20d"]),
         "volume_ratio": round(volume_ratio, 2),
+        "volume_lookback_days": int(volume_lookback_days),
+        "volume_signal_window_days": int(volume_signal_window_days),
+        "volume_multiplier": round(volume_multiplier, 2),
+        "volume_signal_date": volume_signal["volume_signal_date"],
+        "volume_signal_volume": volume_signal["volume_signal_volume"],
+        "volume_signal_avg_volume_20d": volume_signal["volume_signal_avg_volume_20d"],
+        "volume_signal_ratio": volume_signal["volume_signal_ratio"],
+        "volume_signal_price_change_pct": volume_signal["volume_signal_price_change_pct"],
+        "days_since_volume_signal": volume_signal["days_since_volume_signal"],
         "up_down_volume_ratio": round(up_down_volume_ratio, 2),
         "recent_trend_pct": round(recent_trend_pct, 2),
         "ma20_slope_pct": round(ma20_slope_pct, 2),
         "left_leg_days": int(left_leg_days),
         "right_leg_days": int(right_leg_days),
+        "bottom_days": int(bottom_stats["bottom_days"]),
+        "bottom_span_days": int(bottom_stats["bottom_span_days"]),
         "positive_reasons": positive_reasons[:4],
         "caution_reasons": caution_reasons[:4],
     }

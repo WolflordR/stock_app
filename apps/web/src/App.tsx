@@ -121,9 +121,9 @@ type BacktestTuningParams = {
   breakout_volume_long_window: number;
   bowl_volume_lookback_days: number;
   bowl_volume_min_drawdown_pct: number;
-  bowl_volume_short_window: number;
-  bowl_volume_long_window: number;
-  bowl_volume_min_volume_ratio: number;
+  bowl_volume_volume_lookback_days: number;
+  bowl_volume_signal_window_days: number;
+  bowl_volume_multiplier: number;
   bowl_volume_trend_lookback_days: number;
 };
 
@@ -160,9 +160,9 @@ const defaultBacktestParams: BacktestTuningParams = {
   breakout_volume_long_window: 20,
   bowl_volume_lookback_days: 120,
   bowl_volume_min_drawdown_pct: 20,
-  bowl_volume_short_window: 5,
-  bowl_volume_long_window: 20,
-  bowl_volume_min_volume_ratio: 1.2,
+  bowl_volume_volume_lookback_days: 20,
+  bowl_volume_signal_window_days: 3,
+  bowl_volume_multiplier: 2,
   bowl_volume_trend_lookback_days: 10
 };
 
@@ -1741,6 +1741,9 @@ type BacktestResultRow = {
   score: number | null;
   rsSpreadPct: number | null;
   volumeRatio: number | null;
+  volumeSignalDate: string;
+  volumeSignalPriceChangePct: number | null;
+  daysSinceVolumeSignal: number | null;
   returnPct: number | null;
   totalTrades: number | null;
   positiveReasons: string[];
@@ -1853,9 +1856,9 @@ function BacktestParamPanel({
           <>
             <ParamNumber label="碗形觀察天數" value={params.bowl_volume_lookback_days} min={60} max={260} onValueChange={(value) => onParamsChange({ bowl_volume_lookback_days: value })} />
             <ParamDecimal label="最小跌幅 %" value={params.bowl_volume_min_drawdown_pct} min={1} max={80} onValueChange={(value) => onParamsChange({ bowl_volume_min_drawdown_pct: value })} />
-            <ParamNumber label="短均量天數" value={params.bowl_volume_short_window} min={1} max={60} onValueChange={(value) => onParamsChange({ bowl_volume_short_window: value })} />
-            <ParamNumber label="長均量天數" value={params.bowl_volume_long_window} min={2} max={120} onValueChange={(value) => onParamsChange({ bowl_volume_long_window: value })} />
-            <ParamDecimal label="最小量比" value={params.bowl_volume_min_volume_ratio} min={0.1} max={10} onValueChange={(value) => onParamsChange({ bowl_volume_min_volume_ratio: value })} />
+            <ParamNumber label="量能基準天數" value={params.bowl_volume_volume_lookback_days} min={2} max={120} onValueChange={(value) => onParamsChange({ bowl_volume_volume_lookback_days: value })} />
+            <ParamNumber label="爆量觀察天數" value={params.bowl_volume_signal_window_days} min={1} max={10} onValueChange={(value) => onParamsChange({ bowl_volume_signal_window_days: value })} />
+            <ParamDecimal label="爆量倍數" value={params.bowl_volume_multiplier} min={0.1} max={20} onValueChange={(value) => onParamsChange({ bowl_volume_multiplier: value })} />
             <ParamNumber label="近期趨勢天數" value={params.bowl_volume_trend_lookback_days} min={3} max={120} onValueChange={(value) => onParamsChange({ bowl_volume_trend_lookback_days: value })} />
           </>
         ) : null}
@@ -1911,7 +1914,10 @@ function normalizeBacktestResults(preview: BacktestJob["result_preview"]): Backt
       price: getNumber(row.price ?? row.ending_capital),
       score: getNumber(row.bowl_volume_score ?? row.near_breakout_score ?? row.pullback_score ?? row.high_price_pullback_score ?? row.vcp_score ?? row.bowl_score),
       rsSpreadPct: getNumber(row.rs_spread_pct ?? row.avg_buy_rs_spread),
-      volumeRatio: getNumber(row.bowl_volume_volume_ratio ?? row.near_breakout_volume_ratio ?? row.current_volume_ratio ?? row.recent3_volume_ratio ?? row.avg5_volume_ratio),
+      volumeRatio: getNumber(row.bowl_volume_signal_ratio ?? row.bowl_volume_volume_ratio ?? row.near_breakout_volume_ratio ?? row.current_volume_ratio ?? row.recent3_volume_ratio ?? row.avg5_volume_ratio),
+      volumeSignalDate: getString(row.bowl_volume_signal_date),
+      volumeSignalPriceChangePct: getNumber(row.bowl_volume_signal_price_change_pct),
+      daysSinceVolumeSignal: getNumber(row.bowl_volume_days_since_volume_signal),
       returnPct: getNumber(row.total_return),
       totalTrades: getNumber(row.total_trades),
       positiveReasons: firstStringList(row.bowl_volume_positive_reasons, row.near_breakout_positive_reasons, row.positive_reasons, row.pullback_positive_reasons, row.vcp_positive_reasons, row.high_price_pullback_positive_reasons),
@@ -1956,6 +1962,11 @@ function formatBacktestScore(row: BacktestResultRow) {
 }
 
 function formatBacktestReason(row: BacktestResultRow) {
+  if (row.volumeSignalDate && row.volumeRatio !== null) {
+    const dayText = row.daysSinceVolumeSignal === 0 ? "今日" : `${row.daysSinceVolumeSignal}日前`;
+    const changeText = row.volumeSignalPriceChangePct !== null ? `，漲幅 ${formatPct(row.volumeSignalPriceChangePct)}` : "";
+    return `${row.volumeSignalDate}（${dayText}）放量 ${row.volumeRatio.toFixed(2)}x${changeText}`;
+  }
   const reason = row.positiveReasons[0] || row.cautionReasons[0];
   if (reason) return reason;
   if (row.volumeRatio !== null) return `量比 ${row.volumeRatio.toFixed(2)}x`;
