@@ -1291,6 +1291,25 @@ h1 {
   grid-template-columns: minmax(110px, 1fr) 64px 92px 86px 86px minmax(160px, 1.3fr);
 }
 
+.stock-revenue-block {
+  display: grid;
+  gap: 10px;
+}
+
+.stock-revenue-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #aeb8be;
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+.stock-revenue-table .dense-row {
+  grid-template-columns: 82px minmax(86px, 1fr) 72px 72px 86px;
+}
+
 .research-table .dense-row {
   grid-template-columns: minmax(130px, 1fr) 76px minmax(120px, 0.7fr) minmax(160px, 1fr);
 }

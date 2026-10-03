@@ -1087,6 +1087,35 @@ def list_stock_institutional_history(stock_code: str, market: str = "TWSE", limi
     return _rows_to_dicts(rows)
 
 
+def list_stock_monthly_revenue(stock_code: str, limit: int = 12) -> list[dict[str, Any]]:
+    normalized_limit = max(1, min(int(limit), 36))
+    normalized_code = str(stock_code or "").strip().zfill(4)
+    with _connect_db("revenue_cache.db") as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                report_month,
+                output_date,
+                market,
+                code,
+                name_zh,
+                industry,
+                current_revenue,
+                mom_pct,
+                yoy_pct,
+                cumulative_revenue,
+                cumulative_yoy_pct,
+                updated_at
+            FROM monthly_revenue
+            WHERE code = ?
+            ORDER BY report_month DESC
+            LIMIT ?
+            """,
+            (normalized_code, normalized_limit),
+        ).fetchall()
+    return _rows_to_dicts(rows)
+
+
 def build_stock_overview(stock_id: str) -> dict[str, Any]:
     security = find_security(stock_id)
     if not security:
@@ -1099,6 +1128,7 @@ def build_stock_overview(stock_id: str) -> dict[str, Any]:
             "quotes": [],
             "broker_summary": None,
             "institutional_trading": [],
+            "monthly_revenue": [],
         }
 
     symbol = security["yfinance_symbol"]
@@ -1135,5 +1165,6 @@ def build_stock_overview(stock_id: str) -> dict[str, Any]:
             "quotes": quotes,
             "broker_summary": broker_payload,
             "institutional_trading": list_stock_institutional_history(stock_code, market=market, limit=20),
+            "monthly_revenue": list_stock_monthly_revenue(stock_code, limit=12),
         }
     )

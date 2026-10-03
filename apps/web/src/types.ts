@@ -218,6 +218,21 @@ export type InstitutionalTradingRow = {
   fetched_at: string;
 };
 
+export type MonthlyRevenueRow = {
+  report_month: string;
+  output_date: string | null;
+  market: string;
+  code: string;
+  name_zh: string | null;
+  industry: string | null;
+  current_revenue: number | null;
+  mom_pct: number | null;
+  yoy_pct: number | null;
+  cumulative_revenue: number | null;
+  cumulative_yoy_pct: number | null;
+  updated_at: string | null;
+};
+
 export type PriceQuote = {
   trade_date: string;
   open: number | null;
@@ -238,6 +253,7 @@ export type StockOverview = StockDetail & {
   quotes: PriceQuote[];
   broker_summary: BrokerSummary | null;
   institutional_trading: InstitutionalTradingRow[];
+  monthly_revenue: MonthlyRevenueRow[];
 };
 
 export type StrongStockRow = {

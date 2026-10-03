@@ -974,6 +974,18 @@ function StockView({
         )}
       </section>
 
+      <section className="quotes-panel stock-detail-panel">
+        <div className="section-title">
+          <TrendingUp size={20} />
+          <h2>月營收</h2>
+        </div>
+        {(stockOverview?.monthly_revenue ?? []).length ? (
+          <MonthlyRevenueTable rows={stockOverview?.monthly_revenue ?? []} />
+        ) : (
+          <p className="muted">目前 revenue_cache.db 沒有這檔股票的月營收資料。</p>
+        )}
+      </section>
+
       <section className="stock-local-strip">
         <div className="section-title">
           <BarChart3 size={18} />
@@ -992,6 +1004,39 @@ function StockView({
         )}
       </section>
     </>
+  );
+}
+
+function MonthlyRevenueTable({ rows }: { rows: StockOverview["monthly_revenue"] }) {
+  const sparkValues = [...rows]
+    .reverse()
+    .map((row) => Number(row.current_revenue ?? 0))
+    .filter((value) => value > 0);
+  return (
+    <div className="stock-revenue-block">
+      <div className="stock-revenue-summary">
+        <span>近 {rows.length} 個月</span>
+        <Sparkline values={sparkValues} rising={(rows[0]?.yoy_pct ?? 0) >= 0} />
+      </div>
+      <div className="dense-table stock-revenue-table">
+        <div className="dense-row table-header" aria-hidden="true">
+          <span>月份</span>
+          <span>當月營收</span>
+          <span>月增</span>
+          <span>年增</span>
+          <span>累計年增</span>
+        </div>
+        {rows.map((row) => (
+          <div className="dense-row" key={`${row.market}-${row.code}-${row.report_month}`}>
+            <strong>{row.report_month}</strong>
+            <span>{formatLargeAmount(row.current_revenue)}</span>
+            <em className={toneClass(row.mom_pct)}>{formatPct(row.mom_pct)}</em>
+            <em className={toneClass(row.yoy_pct)}>{formatPct(row.yoy_pct)}</em>
+            <em className={toneClass(row.cumulative_yoy_pct)}>{formatPct(row.cumulative_yoy_pct)}</em>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
