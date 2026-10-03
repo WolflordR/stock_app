@@ -117,6 +117,7 @@ export type Security = {
   full_name_zh: string | null;
   market: string;
   yfinance_symbol: string;
+  industry: string | null;
   industry_code: string | null;
   paid_in_capital: number | null;
   issued_common_shares: number | null;

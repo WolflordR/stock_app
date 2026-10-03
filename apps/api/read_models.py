@@ -9,6 +9,7 @@ from modules.core.project_paths import db_path
 from modules.data_sources.official_broker_import import get_latest_official_broker_summary, list_official_broker_branches
 from modules.data_sources.price_cache import get_price_cache_status
 from modules.data_sources.stock_db import find_security
+from modules.industry.classification_queries import get_company_official_industry_df
 from modules.backtest.strategy_config import BUY_STRATEGY_METADATA, DEFAULT_BUY_STRATEGIES, DEFAULT_SELL_STRATEGIES, SELL_STRATEGY_METADATA
 
 
@@ -1103,6 +1104,12 @@ def build_stock_overview(stock_id: str) -> dict[str, Any]:
     symbol = security["yfinance_symbol"]
     market = security.get("market") or "TWSE"
     stock_code = security["code"]
+    industry_lookup_df = get_company_official_industry_df()
+    industry_lookup = dict(zip(industry_lookup_df["code"], industry_lookup_df["industry"])) if not industry_lookup_df.empty else {}
+    security = {
+        **security,
+        "industry": industry_lookup.get(str(stock_code).zfill(4)) or security.get("industry_code"),
+    }
     price_cache = get_price_cache_status(symbol)
     quotes = list_stock_price_history(symbol, limit=STOCK_CHART_HISTORY_LIMIT)
     broker_summary = get_latest_official_broker_summary(stock_code, market=market)

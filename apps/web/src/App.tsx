@@ -2200,8 +2200,8 @@ function StockIdentity({ stockOverview }: { stockOverview: StockOverview | null 
               <dd>{stockOverview.security.yfinance_symbol}</dd>
             </div>
             <div>
-              <dt>產業代碼</dt>
-              <dd>{stockOverview.security.industry_code || "-"}</dd>
+              <dt>產業</dt>
+              <dd>{stockOverview.security.industry || stockOverview.security.industry_code || "-"}</dd>
             </div>
             <div>
               <dt>價格快取</dt>
