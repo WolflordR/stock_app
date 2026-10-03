@@ -4,6 +4,8 @@ import {
   BarChart3,
   BriefcaseBusiness,
   CalendarClock,
+  ChevronLeft,
+  ChevronRight,
   Database,
   FileSearch,
   HardDrive,
@@ -75,6 +77,17 @@ import type {
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 type ViewKey = "overview" | "stock" | "strong" | "data" | "market" | "broker" | "revenue" | "usCalendar" | "etf" | "backtest" | "news" | "research" | "system";
+type StockNavigation = {
+  sourceLabel: string;
+  codes: string[];
+};
+type StockNavigationState = {
+  sourceLabel: string;
+  currentIndex: number;
+  total: number;
+  previousCode: string | null;
+  nextCode: string | null;
+};
 type BacktestTuningParams = {
   range_lookback_days: number;
   range_max_width_pct: number;
@@ -187,6 +200,7 @@ export function App() {
   const [stockOverview, setStockOverview] = useState<StockOverview | null>(null);
   const [stockLoading, setStockLoading] = useState(false);
   const [stockUpdating, setStockUpdating] = useState(false);
+  const [stockNavigation, setStockNavigation] = useState<StockNavigation | null>(null);
   const [strongStocks, setStrongStocks] = useState<StrongStocks | null>(null);
   const [strongDays, setStrongDays] = useState(7);
   const [strongLimit, setStrongLimit] = useState(10);
@@ -281,6 +295,17 @@ export function App() {
     } finally {
       setStockLoading(false);
     }
+  }
+
+  function openStockDetail(code: string, navigation?: StockNavigation | null) {
+    const normalized = code.trim();
+    if (!normalized) return;
+    setStockInput(normalized);
+    if (navigation !== undefined) {
+      setStockNavigation(navigation);
+    }
+    setActiveView("stock");
+    void loadStock(normalized);
   }
 
   async function handleStockPriceUpdate() {
@@ -490,8 +515,8 @@ export function App() {
 
   function handleStockSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setActiveView("stock");
-    void loadStock();
+    setStockNavigation(null);
+    openStockDetail(stockInput, null);
   }
 
   function handleBrokerSubmit(event: FormEvent<HTMLFormElement>) {
@@ -560,6 +585,7 @@ export function App() {
   }, [overview]);
 
   const stockQuotes = stockOverview?.quotes ?? emptyQuotes;
+  const stockNavigationState = getStockNavigationState(stockNavigation, stockOverview?.security?.code || stockInput);
   const sections = overview?.sections;
   const stockStatus = sections?.stocks.data;
   const marketMap = sections?.market_map.data;
@@ -632,9 +658,11 @@ export function App() {
             stockOverview={stockOverview}
             stockQuotes={stockQuotes}
             stockError={stockError}
+            navigation={stockNavigationState}
             onStockInputChange={setStockInput}
             onStockSubmit={handleStockSubmit}
             onPriceUpdate={handleStockPriceUpdate}
+            onNavigateStock={(code) => openStockDetail(code)}
           />
         ) : null}
 
@@ -646,9 +674,10 @@ export function App() {
             strongLoading={strongLoading}
             onStrongParamsChange={loadStrongStocks}
             onStockSelect={(code) => {
-              setStockInput(code);
-              setActiveView("stock");
-              void loadStock(code);
+              openStockDetail(code, {
+                sourceLabel: `強勢個股 ${strongDays}日排行`,
+                codes: uniqueCodes(strongStocks?.rows.map((row) => row.code) ?? [])
+              });
             }}
           />
         ) : null}
@@ -755,9 +784,10 @@ export function App() {
             onParamsChange={(patch) => setBacktestParams((current) => ({ ...current, ...patch }))}
             onStart={handleBacktestStart}
             onStockSelect={(code) => {
-              setStockInput(code);
-              setActiveView("stock");
-              void loadStock(code);
+              openStockDetail(code, {
+                sourceLabel: `選股結果：${backtestBuyStrategy}`,
+                codes: uniqueCodes(normalizeBacktestResults(backtestJob?.result_preview).map((row) => row.code))
+              });
             }}
           />
         ) : null}
@@ -850,9 +880,11 @@ function StockView({
   stockOverview,
   stockQuotes,
   stockError,
+  navigation,
   onStockInputChange,
   onStockSubmit,
-  onPriceUpdate
+  onPriceUpdate,
+  onNavigateStock
 }: {
   stockInput: string;
   stockLoading: boolean;
@@ -860,9 +892,11 @@ function StockView({
   stockOverview: StockOverview | null;
   stockQuotes: StockOverview["quotes"];
   stockError: string;
+  navigation: StockNavigationState | null;
   onStockInputChange: (value: string) => void;
   onStockSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onPriceUpdate: () => Promise<void>;
+  onNavigateStock: (code: string) => void;
 }) {
   return (
     <>
@@ -884,6 +918,22 @@ function StockView({
               {stockUpdating ? "更新中" : "更新價格"}
             </button>
           </form>
+          {navigation ? (
+            <div className="stock-list-navigation">
+              <span>{navigation.sourceLabel}</span>
+              <strong>{navigation.currentIndex + 1} / {navigation.total}</strong>
+              <div>
+                <button type="button" onClick={() => navigation.previousCode && onNavigateStock(navigation.previousCode)} disabled={!navigation.previousCode || stockLoading}>
+                  <ChevronLeft size={16} />
+                  上一檔
+                </button>
+                <button type="button" onClick={() => navigation.nextCode && onNavigateStock(navigation.nextCode)} disabled={!navigation.nextCode || stockLoading}>
+                  下一檔
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+            </div>
+          ) : null}
           {stockError ? <p className="inline-error">{stockError}</p> : null}
           <StockIdentity stockOverview={stockOverview} />
         </article>
@@ -1868,6 +1918,34 @@ function normalizeBacktestResults(preview: BacktestJob["result_preview"]): Backt
       cautionReasons: firstStringList(row.bowl_volume_caution_reasons, row.near_breakout_caution_reasons, row.caution_reasons, row.pullback_caution_reasons, row.vcp_caution_reasons, row.high_price_pullback_caution_reasons)
     };
   });
+}
+
+function uniqueCodes(codes: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const rawCode of codes) {
+    const code = String(rawCode || "").trim();
+    if (!code || seen.has(code)) continue;
+    seen.add(code);
+    result.push(code);
+  }
+  return result;
+}
+
+function getStockNavigationState(navigation: StockNavigation | null, currentCode: string): StockNavigationState | null {
+  if (!navigation?.codes.length) return null;
+  const codes = uniqueCodes(navigation.codes);
+  if (codes.length < 2) return null;
+  const normalizedCurrent = String(currentCode || "").trim();
+  const currentIndex = codes.findIndex((code) => code === normalizedCurrent);
+  if (currentIndex < 0) return null;
+  return {
+    sourceLabel: navigation.sourceLabel,
+    currentIndex,
+    total: codes.length,
+    previousCode: currentIndex > 0 ? codes[currentIndex - 1] : null,
+    nextCode: currentIndex < codes.length - 1 ? codes[currentIndex + 1] : null
+  };
 }
 
 function formatBacktestScore(row: BacktestResultRow) {
