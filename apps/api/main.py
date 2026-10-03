@@ -245,6 +245,42 @@ if app is not None:
                 return [item["yfinance_symbol"] for item in get_securities_in_range(start_code, end_code)]
             return [item["yfinance_symbol"] for item in get_securities_in_range(0, 9999)]
 
+    def _start_web_bootstrap_price_job() -> dict[str, object]:
+        if not SETTINGS.web_bootstrap_price_enabled:
+            return {"ok": True, "started": False, "reason": "web bootstrap price update is disabled", "job": None}
+        stock_ids = [item["yfinance_symbol"] for item in get_securities_in_range(0, 9999)]
+        if not stock_ids:
+            return {"ok": False, "started": False, "error": "No stocks are available in the local stock master.", "job": None}
+
+        days = max(30, min(int(SETTINGS.web_bootstrap_price_days), 2200))
+        force = bool(SETTINGS.web_bootstrap_price_force)
+        cache_key = ("web_bootstrap", date.today().isoformat(), "all", len(stock_ids), days, force)
+        job_id = data_jobs.get_or_create_job(
+            "price_cache_update",
+            cache_key,
+            update_stocks,
+            args=(stock_ids,),
+            kwargs={"days": days, "force": force},
+            pending_message=f"開啟網站後自動暖機價格資料，共 {len(stock_ids)} 檔",
+            running_message=f"正在背景更新價格資料，共 {len(stock_ids)} 檔",
+            completed_message=lambda result=None, error=None: (
+                f"背景資料更新完成：成功 {result.get('ok_count', 0)} 檔，失敗 {result.get('failed_count', 0)} 檔"
+                if isinstance(result, dict)
+                else "背景資料更新完成"
+            ),
+            failed_message="背景資料更新失敗",
+        )
+        job = data_jobs.get_job(job_id, include_result=False)
+        return {
+            "ok": True,
+            "started": job.get("status") in {"queued", "running"} if job else True,
+            "job_id": job_id,
+            "stock_count": len(stock_ids),
+            "days": days,
+            "force": force,
+            "job": _json_safe_response(job),
+        }
+
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
@@ -256,6 +292,11 @@ if app is not None:
     @app.get("/api/runtime/data-status")
     def data_status() -> dict[str, object]:
         return build_data_status_payload()
+
+    @app.post("/api/bootstrap/jobs")
+    def start_bootstrap_jobs() -> dict[str, object]:
+        price_job = _start_web_bootstrap_price_job()
+        return {"ok": bool(price_job.get("ok")), "price_cache": price_job}
 
     @app.get("/api/data/sources")
     def data_sources() -> dict[str, object]:

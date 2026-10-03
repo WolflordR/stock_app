@@ -310,6 +310,21 @@ export type PriceCacheJobResponse = {
   error?: string;
 };
 
+export type BootstrapJobsResponse = {
+  ok: boolean;
+  price_cache?: {
+    ok: boolean;
+    started?: boolean;
+    job_id?: string;
+    stock_count?: number;
+    days?: number;
+    force?: boolean;
+    reason?: string;
+    error?: string;
+    job?: PriceCacheJob | null;
+  };
+};
+
 export type RevenueMomentumRow = {
   report_month: string;
   output_date: string | null;

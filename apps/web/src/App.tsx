@@ -43,6 +43,7 @@ import {
   fetchUsMarketCalendar,
   startNewsJob,
   startBacktestJob,
+  startBootstrapJobs,
   startPriceCacheJob,
   updateStockPriceCache
 } from "./api";
@@ -316,6 +317,17 @@ export function App() {
     }
   }
 
+  async function startBootstrapDataJobs() {
+    try {
+      const result = await startBootstrapJobs();
+      if (result.price_cache?.job) {
+        setPriceJob(result.price_cache.job);
+      }
+    } catch {
+      // Opening the app should stay fast even if the background warm-up endpoint is unavailable.
+    }
+  }
+
   async function handlePriceJobStart() {
     setPriceJobStarting(true);
     setFeatureError("");
@@ -466,6 +478,7 @@ export function App() {
   }
 
   useEffect(() => {
+    void startBootstrapDataJobs();
     void loadOverview();
     void loadStock("2330");
     void loadStrongStocks(7);

@@ -6,6 +6,7 @@ import type {
   ActiveEtfSnapshots,
   BacktestConfig,
   BacktestJobResponse,
+  BootstrapJobsResponse,
   BrokerBranch,
   MarketMapGroup,
   MarketMapMember,
@@ -48,6 +49,10 @@ async function postJson<T>(path: string, payload: unknown): Promise<T> {
 
 export function fetchDataStatus(): Promise<DataStatus> {
   return requestJson<DataStatus>("/api/runtime/data-status");
+}
+
+export function startBootstrapJobs(): Promise<BootstrapJobsResponse> {
+  return postJson<BootstrapJobsResponse>("/api/bootstrap/jobs", {});
 }
 
 export function fetchDataSourcesOverview(): Promise<DataSourcesOverview> {
