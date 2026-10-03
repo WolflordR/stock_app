@@ -613,7 +613,7 @@ export function App() {
         </nav>
       </aside>
 
-      <section className="workspace">
+      <section className={`workspace ${activeView === "stock" ? "compact-workspace" : ""}`}>
         <header className="top-bar">
           <div>
             <p className="eyebrow">Trade Lab Web</p>
@@ -900,8 +900,8 @@ function StockView({
 }) {
   return (
     <>
-      <section className="lower-grid">
-        <article className="stock-panel">
+      <section className="stock-top-grid">
+        <article className="stock-panel stock-query-panel">
           <div className="section-title">
             <Search size={20} />
             <h2>股票主檔查詢</h2>
@@ -937,27 +937,9 @@ function StockView({
           {stockError ? <p className="inline-error">{stockError}</p> : null}
           <StockIdentity stockOverview={stockOverview} />
         </article>
-
-        <article className="stock-panel">
-          <div className="section-title">
-            <BarChart3 size={20} />
-            <h2>個股本地資料</h2>
-          </div>
-          {stockOverview?.found ? (
-            <div className="stock-data-grid">
-              <MiniDataCard label="價格列數" value={stockOverview.price_cache?.row_count ?? 0} />
-              <MiniDataCard label="快取狀態" value={stockOverview.price_cache?.fetch_status ?? "-"} />
-              <MiniDataCard label="最後收盤" value={formatPrice(stockOverview.latest_quote?.close)} />
-              <MiniDataCard label="漲跌幅" value={formatChangePct(stockOverview.latest_quote?.change_pct)} />
-              <MiniDataCard label="分點日期" value={stockOverview.broker_summary?.trade_date ?? "尚無本地匯入"} />
-            </div>
-          ) : (
-            <p className="muted">輸入股票代號或名稱後會讀取本地 DB 狀態。</p>
-          )}
-        </article>
       </section>
 
-      <section className="broker-panel">
+      <section className="broker-panel stock-detail-panel">
         <div className="section-title">
           <Activity size={20} />
           <h2>K 線與成交量</h2>
@@ -965,7 +947,7 @@ function StockView({
         <CandlestickVolumeChart quotes={stockQuotes} />
       </section>
 
-      <section className="broker-panel">
+      <section className="broker-panel stock-detail-panel">
         <div className="section-title">
           <BriefcaseBusiness size={20} />
           <h2>券商分點摘要</h2>
@@ -980,7 +962,7 @@ function StockView({
         )}
       </section>
 
-      <section className="quotes-panel">
+      <section className="quotes-panel stock-detail-panel">
         <div className="section-title">
           <Activity size={20} />
           <h2>三大法人買賣超</h2>
@@ -989,6 +971,24 @@ function StockView({
           <InstitutionalTradingTable rows={stockOverview?.institutional_trading ?? []} />
         ) : (
           <p className="muted">目前本地 chip_cache.db 沒有這檔股票的三大法人買賣資料。</p>
+        )}
+      </section>
+
+      <section className="stock-local-strip">
+        <div className="section-title">
+          <BarChart3 size={18} />
+          <h2>個股本地資料</h2>
+        </div>
+        {stockOverview?.found ? (
+          <div className="stock-data-grid compact">
+            <MiniDataCard label="價格列數" value={stockOverview.price_cache?.row_count ?? 0} />
+            <MiniDataCard label="快取狀態" value={stockOverview.price_cache?.fetch_status ?? "-"} />
+            <MiniDataCard label="最後收盤" value={formatPrice(stockOverview.latest_quote?.close)} />
+            <MiniDataCard label="漲跌幅" value={formatChangePct(stockOverview.latest_quote?.change_pct)} />
+            <MiniDataCard label="分點日期" value={stockOverview.broker_summary?.trade_date ?? "尚無本地匯入"} />
+          </div>
+        ) : (
+          <p className="muted">輸入股票代號或名稱後會讀取本地 DB 狀態。</p>
         )}
       </section>
     </>

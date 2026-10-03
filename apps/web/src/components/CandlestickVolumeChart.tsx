@@ -36,6 +36,7 @@ type OhlcDisplay = {
 };
 
 type ChartInterval = "daily" | "weekly" | "monthly";
+const CHART_HEIGHT = 330;
 
 const intervalLabels: Record<ChartInterval, string> = {
   daily: "日K",
@@ -83,7 +84,7 @@ export function CandlestickVolumeChart({ quotes }: { quotes: PriceQuote[] }) {
       setChartError("");
       chart = createChart(container, {
         width: Math.max(container.clientWidth, 320),
-        height: 430,
+        height: CHART_HEIGHT,
         layout: {
           background: { type: ColorType.Solid, color: "#131722" },
           textColor: "#aeb8be"
@@ -178,7 +179,7 @@ export function CandlestickVolumeChart({ quotes }: { quotes: PriceQuote[] }) {
         resizeObserver = new ResizeObserver(([entry]) => {
           if (disposed || !chart) return;
           const width = Math.max(Math.floor(entry.contentRect.width), 320);
-          chart.applyOptions({ width, height: 430 });
+          chart.applyOptions({ width, height: CHART_HEIGHT });
         });
         resizeObserver.observe(container);
       }
