@@ -192,6 +192,17 @@ export type BacktestStartPayload = {
   high_price_pullback_lookback_days?: number;
   high_price_pullback_market_cap_rank_limit?: number;
   high_price_pullback_min_drop_pct?: number;
+  breakout_lookback_days?: number;
+  breakout_distance_pct?: number;
+  breakout_trend_lookback_days?: number;
+  breakout_volume_short_window?: number;
+  breakout_volume_long_window?: number;
+  bowl_volume_lookback_days?: number;
+  bowl_volume_min_drawdown_pct?: number;
+  bowl_volume_short_window?: number;
+  bowl_volume_long_window?: number;
+  bowl_volume_min_volume_ratio?: number;
+  bowl_volume_trend_lookback_days?: number;
 };
 
 export function startBacktestJob(payload: BacktestStartPayload): Promise<BacktestJobResponse> {

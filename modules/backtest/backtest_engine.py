@@ -136,6 +136,8 @@ def _build_trade_record(*, buy_date, buy_price, sell_date, sell_price, trading_c
         "high_price_pullback_depth_pct": active_setup.get("high_price_pullback_depth_pct"),
         "high_price_pullback_reference_high": active_setup.get("high_price_pullback_reference_high"),
         "high_price_pullback_latest_close": active_setup.get("high_price_pullback_latest_close"),
+        "near_breakout_score": active_setup.get("near_breakout_score"),
+        "bowl_volume_score": active_setup.get("bowl_volume_score"),
     }
 
 
@@ -188,6 +190,17 @@ def check_stock(
     high_price_pullback_market_cap_rank_limit=50,
     high_price_pullback_min_drop_pct=15.0,
     high_price_pullback_eligible_symbol_set=None,
+    breakout_lookback_days=252,
+    breakout_distance_pct=10.0,
+    breakout_trend_lookback_days=20,
+    breakout_volume_short_window=5,
+    breakout_volume_long_window=20,
+    bowl_volume_lookback_days=120,
+    bowl_volume_min_drawdown_pct=20.0,
+    bowl_volume_short_window=5,
+    bowl_volume_long_window=20,
+    bowl_volume_min_volume_ratio=1.2,
+    bowl_volume_trend_lookback_days=10,
     history_buffer_days=120,
 ):
     try:
@@ -243,6 +256,17 @@ def check_stock(
             "high_price_pullback_market_cap_rank_limit": high_price_pullback_market_cap_rank_limit,
             "high_price_pullback_min_drop_pct": high_price_pullback_min_drop_pct,
             "high_price_pullback_eligible_symbol_set": high_price_pullback_eligible_symbol_set or set(),
+            "breakout_lookback_days": breakout_lookback_days,
+            "breakout_distance_pct": breakout_distance_pct,
+            "breakout_trend_lookback_days": breakout_trend_lookback_days,
+            "breakout_volume_short_window": breakout_volume_short_window,
+            "breakout_volume_long_window": breakout_volume_long_window,
+            "bowl_volume_lookback_days": bowl_volume_lookback_days,
+            "bowl_volume_min_drawdown_pct": bowl_volume_min_drawdown_pct,
+            "bowl_volume_short_window": bowl_volume_short_window,
+            "bowl_volume_long_window": bowl_volume_long_window,
+            "bowl_volume_min_volume_ratio": bowl_volume_min_volume_ratio,
+            "bowl_volume_trend_lookback_days": bowl_volume_trend_lookback_days,
             "stock_id": stock_id,
         }
 
@@ -423,11 +447,65 @@ def check_stock(
                 "high_price_pullback_latest_close": buy_setup.get("high_price_pullback_latest_close"),
                 "high_price_pullback_positive_reasons": buy_setup.get("high_price_pullback_positive_reasons") or [],
                 "high_price_pullback_caution_reasons": buy_setup.get("high_price_pullback_caution_reasons") or [],
+                "near_breakout_score": buy_setup.get("near_breakout_score"),
+                "near_breakout_latest_close": buy_setup.get("near_breakout_latest_close"),
+                "near_breakout_high_price": buy_setup.get("near_breakout_high_price"),
+                "near_breakout_high_date": buy_setup.get("near_breakout_high_date"),
+                "near_breakout_distance_pct": buy_setup.get("near_breakout_distance_pct"),
+                "near_breakout_latest_volume": buy_setup.get("near_breakout_latest_volume"),
+                "near_breakout_avg_volume_short": buy_setup.get("near_breakout_avg_volume_short"),
+                "near_breakout_avg_volume_long": buy_setup.get("near_breakout_avg_volume_long"),
+                "near_breakout_volume_ratio": buy_setup.get("near_breakout_volume_ratio"),
+                "near_breakout_latest_volume_ratio": buy_setup.get("near_breakout_latest_volume_ratio"),
+                "near_breakout_price_trend_pct": buy_setup.get("near_breakout_price_trend_pct"),
+                "near_breakout_positive_reasons": buy_setup.get("near_breakout_positive_reasons") or [],
+                "near_breakout_caution_reasons": buy_setup.get("near_breakout_caution_reasons") or [],
+                "bowl_volume_score": buy_setup.get("bowl_volume_score"),
+                "bowl_volume_half_year_high": buy_setup.get("bowl_volume_half_year_high"),
+                "bowl_volume_half_year_high_date": buy_setup.get("bowl_volume_half_year_high_date"),
+                "bowl_volume_subsequent_low": buy_setup.get("bowl_volume_subsequent_low"),
+                "bowl_volume_subsequent_low_date": buy_setup.get("bowl_volume_subsequent_low_date"),
+                "bowl_volume_drawdown_pct": buy_setup.get("bowl_volume_drawdown_pct"),
+                "bowl_volume_latest_close": buy_setup.get("bowl_volume_latest_close"),
+                "bowl_volume_recovery_from_bottom_pct": buy_setup.get("bowl_volume_recovery_from_bottom_pct"),
+                "bowl_volume_avg_volume_short": buy_setup.get("bowl_volume_avg_volume_short"),
+                "bowl_volume_avg_volume_long": buy_setup.get("bowl_volume_avg_volume_long"),
+                "bowl_volume_volume_ratio": buy_setup.get("bowl_volume_volume_ratio"),
+                "bowl_volume_up_down_volume_ratio": buy_setup.get("bowl_volume_up_down_volume_ratio"),
+                "bowl_volume_recent_trend_pct": buy_setup.get("bowl_volume_recent_trend_pct"),
+                "bowl_volume_ma20_slope_pct": buy_setup.get("bowl_volume_ma20_slope_pct"),
+                "bowl_volume_positive_reasons": buy_setup.get("bowl_volume_positive_reasons") or [],
+                "bowl_volume_caution_reasons": buy_setup.get("bowl_volume_caution_reasons") or [],
             }
         return None
     except Exception as exc:
         logger.exception("Error checking stock %s", stock_id)
         return None
+
+
+def _sort_scan_results(results):
+    def sort_score(item):
+        _, payload = item
+        if not isinstance(payload, dict):
+            return 0.0
+        for key in (
+            "bowl_volume_score",
+            "near_breakout_score",
+            "pullback_score",
+            "high_price_pullback_score",
+            "vcp_score",
+            "bowl_score",
+            "total_return",
+        ):
+            value = payload.get(key)
+            if value is not None:
+                try:
+                    return float(value)
+                except (TypeError, ValueError):
+                    return 0.0
+        return 0.0
+
+    return dict(sorted(results.items(), key=sort_score, reverse=True))
 
 
 def scan_market(
@@ -482,6 +560,17 @@ def scan_market(
     high_price_pullback_lookback_days=20,
     high_price_pullback_market_cap_rank_limit=50,
     high_price_pullback_min_drop_pct=15.0,
+    breakout_lookback_days=252,
+    breakout_distance_pct=10.0,
+    breakout_trend_lookback_days=20,
+    breakout_volume_short_window=5,
+    breakout_volume_long_window=20,
+    bowl_volume_lookback_days=120,
+    bowl_volume_min_drawdown_pct=20.0,
+    bowl_volume_short_window=5,
+    bowl_volume_long_window=20,
+    bowl_volume_min_volume_ratio=1.2,
+    bowl_volume_trend_lookback_days=10,
     progress_callback=None,
     status_callback=None,
 ):
@@ -572,6 +661,17 @@ def scan_market(
             high_price_pullback_market_cap_rank_limit,
             high_price_pullback_min_drop_pct,
             market_cap_leader_symbol_set,
+            breakout_lookback_days,
+            breakout_distance_pct,
+            breakout_trend_lookback_days,
+            breakout_volume_short_window,
+            breakout_volume_long_window,
+            bowl_volume_lookback_days,
+            bowl_volume_min_drawdown_pct,
+            bowl_volume_short_window,
+            bowl_volume_long_window,
+            bowl_volume_min_volume_ratio,
+            bowl_volume_trend_lookback_days,
             history_buffer_days,
         )
 
@@ -584,4 +684,4 @@ def scan_market(
             progress_callback(i / total_stocks, stock_code)
         time.sleep(request_delay_sec)
 
-    return picked_dict
+    return _sort_scan_results(picked_dict)

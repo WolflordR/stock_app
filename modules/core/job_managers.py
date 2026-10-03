@@ -216,13 +216,13 @@ class BackgroundDataJobManager:
             target_signature = inspect.signature(target)
 
             def progress_callback(progress, message=None):
-                updates = {"progress": float(progress)}
+                updates = {"status": "running", "progress": float(progress)}
                 if message:
                     updates["message"] = str(message)
                 self._update_job(job_id, **updates)
 
             def status_callback(message):
-                self._update_job(job_id, message=str(message))
+                self._update_job(job_id, status="running", message=str(message))
 
             if "progress_callback" in target_signature.parameters and "progress_callback" not in call_kwargs:
                 call_kwargs["progress_callback"] = progress_callback

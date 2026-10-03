@@ -25,11 +25,19 @@ from modules.backtest.signals.sell_registry import (
     evaluate_registered_sell_strategies,
     get_sell_strategy_history_buffer_days,
 )
+from modules.backtest.signals.technical_patterns import (
+    analyze_bowl_bottom_volume_candidate,
+    analyze_near_breakout_candidate,
+    strategy_bowl_bottom_volume,
+    strategy_near_breakout,
+)
 from modules.backtest.signals.vcp import analyze_vcp_candidate, strategy_vcp_breakout
 from modules.backtest.signals.w_bottom import strategy_w_bottom_rebound
 
 __all__ = [
+    "analyze_bowl_bottom_volume_candidate",
     "analyze_high_price_pullback_candidate",
+    "analyze_near_breakout_candidate",
     "analyze_strong_pullback_rebound_candidate",
     "analyze_vcp_candidate",
     "calculate_relative_strength_spread",
@@ -39,6 +47,7 @@ __all__ = [
     "get_sell_strategy_history_buffer_days",
     "strategy_break_support",
     "strategy_breakout_with_volume",
+    "strategy_bowl_bottom_volume",
     "strategy_death_cross",
     "strategy_gap_support_rebound",
     "strategy_golden_cross",
@@ -48,6 +57,7 @@ __all__ = [
     "strategy_monthly_dip",
     "strategy_red_k",
     "strategy_relative_strength_filter",
+    "strategy_near_breakout",
     "strategy_strong_pullback_rebound",
     "strategy_touch_monthly_ma",
     "strategy_uptrend_filter",

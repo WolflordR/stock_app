@@ -4,10 +4,11 @@ PROJECT_ROOT := $(CURDIR)
 PYTHON_BIN ?= $(PROJECT_ROOT)/stock_env/bin/python
 WEB_URL ?= http://127.0.0.1:5173
 
-.PHONY: help api web open update log build check nas-api nas-web
+.PHONY: help dev api web open update log build check nas-api nas-web
 
 help:
 	@echo "Trade Lab commands:"
+	@echo "  make dev       Start API + React frontend together"
 	@echo "  make api       Start FastAPI backend on 127.0.0.1:8000"
 	@echo "  make web       Start React frontend on 127.0.0.1:5173"
 	@echo "  make open      Open the web app in your browser"
@@ -17,6 +18,9 @@ help:
 	@echo "  make check     Run quick backend/frontend checks"
 	@echo "  make nas-api   Start API with NAS-style env"
 	@echo "  make nas-web   Start web with NAS-style env"
+
+dev:
+	TRADE_PYTHON="$(PYTHON_BIN)" scripts/run_dev.sh
 
 api:
 	TRADE_PYTHON="$(PYTHON_BIN)" scripts/run_api.sh

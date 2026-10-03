@@ -177,6 +177,17 @@ if app is not None:
         high_price_pullback_lookback_days: int = Field(default=20, ge=5, le=260)
         high_price_pullback_market_cap_rank_limit: int = Field(default=50, ge=1, le=500)
         high_price_pullback_min_drop_pct: float = Field(default=15.0, ge=0.1, le=90)
+        breakout_lookback_days: int = Field(default=252, ge=30, le=1260)
+        breakout_distance_pct: float = Field(default=10.0, ge=0.1, le=50)
+        breakout_trend_lookback_days: int = Field(default=20, ge=3, le=120)
+        breakout_volume_short_window: int = Field(default=5, ge=1, le=60)
+        breakout_volume_long_window: int = Field(default=20, ge=2, le=120)
+        bowl_volume_lookback_days: int = Field(default=120, ge=60, le=260)
+        bowl_volume_min_drawdown_pct: float = Field(default=20.0, ge=1, le=80)
+        bowl_volume_short_window: int = Field(default=5, ge=1, le=60)
+        bowl_volume_long_window: int = Field(default=20, ge=2, le=120)
+        bowl_volume_min_volume_ratio: float = Field(default=1.2, ge=0.1, le=10)
+        bowl_volume_trend_lookback_days: int = Field(default=10, ge=3, le=120)
 
         def to_scan_request(self) -> BacktestScanRequest:
             today = date.today()
@@ -215,6 +226,17 @@ if app is not None:
                 high_price_pullback_lookback_days=self.high_price_pullback_lookback_days,
                 high_price_pullback_market_cap_rank_limit=self.high_price_pullback_market_cap_rank_limit,
                 high_price_pullback_min_drop_pct=self.high_price_pullback_min_drop_pct,
+                breakout_lookback_days=self.breakout_lookback_days,
+                breakout_distance_pct=self.breakout_distance_pct,
+                breakout_trend_lookback_days=self.breakout_trend_lookback_days,
+                breakout_volume_short_window=self.breakout_volume_short_window,
+                breakout_volume_long_window=self.breakout_volume_long_window,
+                bowl_volume_lookback_days=self.bowl_volume_lookback_days,
+                bowl_volume_min_drawdown_pct=self.bowl_volume_min_drawdown_pct,
+                bowl_volume_short_window=self.bowl_volume_short_window,
+                bowl_volume_long_window=self.bowl_volume_long_window,
+                bowl_volume_min_volume_ratio=self.bowl_volume_min_volume_ratio,
+                bowl_volume_trend_lookback_days=self.bowl_volume_trend_lookback_days,
             )
 
     class NewsStartRequest(BaseModel):

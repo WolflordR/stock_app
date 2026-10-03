@@ -23,6 +23,12 @@ from modules.backtest.signals.pullback import (
 )
 from modules.backtest.signals.registry import evaluate_registered_buy_strategies, get_buy_strategy_history_buffer_days
 from modules.backtest.signals.sell_registry import evaluate_registered_sell_strategies, get_sell_strategy_history_buffer_days
+from modules.backtest.signals.technical_patterns import (
+    analyze_bowl_bottom_volume_candidate,
+    analyze_near_breakout_candidate,
+    strategy_bowl_bottom_volume,
+    strategy_near_breakout,
+)
 from modules.backtest.signals.vcp import analyze_vcp_candidate, strategy_vcp_breakout
 from modules.backtest.signals.w_bottom import strategy_w_bottom_rebound
 

@@ -17,6 +17,10 @@ from modules.backtest.signals.pullback import (
     analyze_high_price_pullback_candidate,
     analyze_strong_pullback_rebound_candidate,
 )
+from modules.backtest.signals.technical_patterns import (
+    analyze_bowl_bottom_volume_candidate,
+    analyze_near_breakout_candidate,
+)
 from modules.backtest.signals.vcp import analyze_vcp_candidate
 from modules.backtest.signals.w_bottom import strategy_w_bottom_rebound
 
@@ -155,6 +159,66 @@ def _evaluate_high_price_pullback(df, _benchmark_df, params):
     }
 
 
+def _evaluate_near_breakout(df, _benchmark_df, params):
+    setup = analyze_near_breakout_candidate(
+        df,
+        lookback_days=_param(params, "breakout_lookback_days", 252),
+        max_distance=float(_param(params, "breakout_distance_pct", 10.0)) / 100.0,
+        trend_lookback_days=_param(params, "breakout_trend_lookback_days", 20),
+        volume_short_window=_param(params, "breakout_volume_short_window", 5),
+        volume_long_window=_param(params, "breakout_volume_long_window", 20),
+    )
+    if not setup:
+        return False, {}
+    return bool(setup.get("matched", False)), {
+        "near_breakout_score": setup.get("score"),
+        "near_breakout_latest_close": setup.get("latest_close"),
+        "near_breakout_high_price": setup.get("high_price"),
+        "near_breakout_high_date": setup.get("high_date"),
+        "near_breakout_distance_pct": setup.get("distance_to_high_pct"),
+        "near_breakout_latest_volume": setup.get("latest_volume"),
+        "near_breakout_avg_volume_short": setup.get("avg_volume_short"),
+        "near_breakout_avg_volume_long": setup.get("avg_volume_long"),
+        "near_breakout_volume_ratio": setup.get("volume_ratio"),
+        "near_breakout_latest_volume_ratio": setup.get("latest_volume_ratio"),
+        "near_breakout_price_trend_pct": setup.get("price_trend_pct"),
+        "near_breakout_positive_reasons": setup.get("positive_reasons") or [],
+        "near_breakout_caution_reasons": setup.get("caution_reasons") or [],
+    }
+
+
+def _evaluate_bowl_bottom_volume(df, _benchmark_df, params):
+    setup = analyze_bowl_bottom_volume_candidate(
+        df,
+        lookback_days=_param(params, "bowl_volume_lookback_days", 120),
+        min_drawdown=float(_param(params, "bowl_volume_min_drawdown_pct", 20.0)) / 100.0,
+        volume_short_window=_param(params, "bowl_volume_short_window", 5),
+        volume_long_window=_param(params, "bowl_volume_long_window", 20),
+        min_volume_ratio=_param(params, "bowl_volume_min_volume_ratio", 1.2),
+        trend_lookback_days=_param(params, "bowl_volume_trend_lookback_days", 10),
+    )
+    if not setup:
+        return False, {}
+    return bool(setup.get("matched", False)), {
+        "bowl_volume_score": setup.get("score"),
+        "bowl_volume_half_year_high": setup.get("half_year_high"),
+        "bowl_volume_half_year_high_date": setup.get("half_year_high_date"),
+        "bowl_volume_subsequent_low": setup.get("subsequent_low"),
+        "bowl_volume_subsequent_low_date": setup.get("subsequent_low_date"),
+        "bowl_volume_drawdown_pct": setup.get("drawdown_pct"),
+        "bowl_volume_latest_close": setup.get("latest_close"),
+        "bowl_volume_recovery_from_bottom_pct": setup.get("recovery_from_bottom_pct"),
+        "bowl_volume_avg_volume_short": setup.get("avg_volume_short"),
+        "bowl_volume_avg_volume_long": setup.get("avg_volume_long"),
+        "bowl_volume_volume_ratio": setup.get("volume_ratio"),
+        "bowl_volume_up_down_volume_ratio": setup.get("up_down_volume_ratio"),
+        "bowl_volume_recent_trend_pct": setup.get("recent_trend_pct"),
+        "bowl_volume_ma20_slope_pct": setup.get("ma20_slope_pct"),
+        "bowl_volume_positive_reasons": setup.get("positive_reasons") or [],
+        "bowl_volume_caution_reasons": setup.get("caution_reasons") or [],
+    }
+
+
 def _evaluate_relative_strength(df, benchmark_df, params):
     matched, rs_spread_pct = strategy_relative_strength_filter(
         df,
@@ -191,6 +255,8 @@ BUY_STRATEGY_REGISTRY = {
     "VCP 收斂突破": _evaluate_vcp,
     "強勢股回檔量縮止跌": _evaluate_pullback_guard,
     "高價股回檔": _evaluate_high_price_pullback,
+    "接近前高／即將突破": _evaluate_near_breakout,
+    "碗形底＋帶量向上": _evaluate_bowl_bottom_volume,
     "相對強弱濾網": _evaluate_relative_strength,
     "W底反彈": _evaluate_w_bottom,
 }
@@ -232,6 +298,10 @@ def get_buy_strategy_history_buffer_days(selected_strategies, selected_sell_stra
         history_buffer_days = max(history_buffer_days, 140)
     if "高價股回檔" in selected_strategies:
         history_buffer_days = max(history_buffer_days, 140)
+    if "接近前高／即將突破" in selected_strategies:
+        history_buffer_days = max(history_buffer_days, 320)
+    if "碗形底＋帶量向上" in selected_strategies:
+        history_buffer_days = max(history_buffer_days, 220)
     if "相對強弱濾網" in selected_strategies:
         history_buffer_days = max(history_buffer_days, rs_lookback_days + 90)
 

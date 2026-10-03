@@ -56,6 +56,17 @@ class BacktestScanRequest:
     high_price_pullback_lookback_days: int = 20
     high_price_pullback_market_cap_rank_limit: int = 50
     high_price_pullback_min_drop_pct: float = 15.0
+    breakout_lookback_days: int = 252
+    breakout_distance_pct: float = 10.0
+    breakout_trend_lookback_days: int = 20
+    breakout_volume_short_window: int = 5
+    breakout_volume_long_window: int = 20
+    bowl_volume_lookback_days: int = 120
+    bowl_volume_min_drawdown_pct: float = 20.0
+    bowl_volume_short_window: int = 5
+    bowl_volume_long_window: int = 20
+    bowl_volume_min_volume_ratio: float = 1.2
+    bowl_volume_trend_lookback_days: int = 10
 
     @classmethod
     def from_sidebar_state(cls, state: dict[str, Any]) -> "BacktestScanRequest":
@@ -109,6 +120,17 @@ class BacktestScanRequest:
             high_price_pullback_lookback_days=int(state["high_price_pullback_lookback_days"]),
             high_price_pullback_market_cap_rank_limit=int(state["high_price_pullback_market_cap_rank_limit"]),
             high_price_pullback_min_drop_pct=float(state["high_price_pullback_min_drop_pct"]),
+            breakout_lookback_days=int(state.get("breakout_lookback_days", 252)),
+            breakout_distance_pct=float(state.get("breakout_distance_pct", 10.0)),
+            breakout_trend_lookback_days=int(state.get("breakout_trend_lookback_days", 20)),
+            breakout_volume_short_window=int(state.get("breakout_volume_short_window", 5)),
+            breakout_volume_long_window=int(state.get("breakout_volume_long_window", 20)),
+            bowl_volume_lookback_days=int(state.get("bowl_volume_lookback_days", 120)),
+            bowl_volume_min_drawdown_pct=float(state.get("bowl_volume_min_drawdown_pct", 20.0)),
+            bowl_volume_short_window=int(state.get("bowl_volume_short_window", 5)),
+            bowl_volume_long_window=int(state.get("bowl_volume_long_window", 20)),
+            bowl_volume_min_volume_ratio=float(state.get("bowl_volume_min_volume_ratio", 1.2)),
+            bowl_volume_trend_lookback_days=int(state.get("bowl_volume_trend_lookback_days", 10)),
         )
 
     def to_engine_kwargs(self) -> dict[str, Any]:

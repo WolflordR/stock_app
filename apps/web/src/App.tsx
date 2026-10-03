@@ -101,6 +101,17 @@ type BacktestTuningParams = {
   high_price_pullback_lookback_days: number;
   high_price_pullback_market_cap_rank_limit: number;
   high_price_pullback_min_drop_pct: number;
+  breakout_lookback_days: number;
+  breakout_distance_pct: number;
+  breakout_trend_lookback_days: number;
+  breakout_volume_short_window: number;
+  breakout_volume_long_window: number;
+  bowl_volume_lookback_days: number;
+  bowl_volume_min_drawdown_pct: number;
+  bowl_volume_short_window: number;
+  bowl_volume_long_window: number;
+  bowl_volume_min_volume_ratio: number;
+  bowl_volume_trend_lookback_days: number;
 };
 
 const defaultBacktestParams: BacktestTuningParams = {
@@ -128,7 +139,18 @@ const defaultBacktestParams: BacktestTuningParams = {
   vcp_max_consolidation_depth_pct: 45,
   high_price_pullback_lookback_days: 20,
   high_price_pullback_market_cap_rank_limit: 50,
-  high_price_pullback_min_drop_pct: 15
+  high_price_pullback_min_drop_pct: 15,
+  breakout_lookback_days: 252,
+  breakout_distance_pct: 10,
+  breakout_trend_lookback_days: 20,
+  breakout_volume_short_window: 5,
+  breakout_volume_long_window: 20,
+  bowl_volume_lookback_days: 120,
+  bowl_volume_min_drawdown_pct: 20,
+  bowl_volume_short_window: 5,
+  bowl_volume_long_window: 20,
+  bowl_volume_min_volume_ratio: 1.2,
+  bowl_volume_trend_lookback_days: 10
 };
 
 const navItems: { key: ViewKey; label: string; icon: ReactNode }[] = [
@@ -1768,6 +1790,25 @@ function BacktestParamPanel({
             <ParamDecimal label="最小回檔 %" value={params.high_price_pullback_min_drop_pct} min={0.1} max={90} onValueChange={(value) => onParamsChange({ high_price_pullback_min_drop_pct: value })} />
           </>
         ) : null}
+        {strategy === "接近前高／即將突破" ? (
+          <>
+            <ParamNumber label="前高觀察天數" value={params.breakout_lookback_days} min={30} max={1260} onValueChange={(value) => onParamsChange({ breakout_lookback_days: value })} />
+            <ParamDecimal label="距前高內 %" value={params.breakout_distance_pct} min={0.1} max={50} onValueChange={(value) => onParamsChange({ breakout_distance_pct: value })} />
+            <ParamNumber label="向上趨勢天數" value={params.breakout_trend_lookback_days} min={3} max={120} onValueChange={(value) => onParamsChange({ breakout_trend_lookback_days: value })} />
+            <ParamNumber label="短均量天數" value={params.breakout_volume_short_window} min={1} max={60} onValueChange={(value) => onParamsChange({ breakout_volume_short_window: value })} />
+            <ParamNumber label="長均量天數" value={params.breakout_volume_long_window} min={2} max={120} onValueChange={(value) => onParamsChange({ breakout_volume_long_window: value })} />
+          </>
+        ) : null}
+        {strategy === "碗形底＋帶量向上" ? (
+          <>
+            <ParamNumber label="碗形觀察天數" value={params.bowl_volume_lookback_days} min={60} max={260} onValueChange={(value) => onParamsChange({ bowl_volume_lookback_days: value })} />
+            <ParamDecimal label="最小跌幅 %" value={params.bowl_volume_min_drawdown_pct} min={1} max={80} onValueChange={(value) => onParamsChange({ bowl_volume_min_drawdown_pct: value })} />
+            <ParamNumber label="短均量天數" value={params.bowl_volume_short_window} min={1} max={60} onValueChange={(value) => onParamsChange({ bowl_volume_short_window: value })} />
+            <ParamNumber label="長均量天數" value={params.bowl_volume_long_window} min={2} max={120} onValueChange={(value) => onParamsChange({ bowl_volume_long_window: value })} />
+            <ParamDecimal label="最小量比" value={params.bowl_volume_min_volume_ratio} min={0.1} max={10} onValueChange={(value) => onParamsChange({ bowl_volume_min_volume_ratio: value })} />
+            <ParamNumber label="近期趨勢天數" value={params.bowl_volume_trend_lookback_days} min={3} max={120} onValueChange={(value) => onParamsChange({ bowl_volume_trend_lookback_days: value })} />
+          </>
+        ) : null}
         <ParamNumber label="盤整天數" value={params.range_lookback_days} min={5} max={260} onValueChange={(value) => onParamsChange({ range_lookback_days: value })} />
         <ParamDecimal label="盤整最大寬度 %" value={params.range_max_width_pct} min={1} max={200} onValueChange={(value) => onParamsChange({ range_max_width_pct: value })} />
         <ParamDecimal label="量增倍率" value={params.range_volume_ratio} min={0.1} max={10} onValueChange={(value) => onParamsChange({ range_volume_ratio: value })} />
@@ -1818,13 +1859,13 @@ function normalizeBacktestResults(preview: BacktestJob["result_preview"]): Backt
       code,
       name: getString(row.name) || code,
       price: getNumber(row.price ?? row.ending_capital),
-      score: getNumber(row.pullback_score ?? row.high_price_pullback_score ?? row.vcp_score ?? row.bowl_score),
+      score: getNumber(row.bowl_volume_score ?? row.near_breakout_score ?? row.pullback_score ?? row.high_price_pullback_score ?? row.vcp_score ?? row.bowl_score),
       rsSpreadPct: getNumber(row.rs_spread_pct ?? row.avg_buy_rs_spread),
-      volumeRatio: getNumber(row.current_volume_ratio ?? row.recent3_volume_ratio ?? row.avg5_volume_ratio),
+      volumeRatio: getNumber(row.bowl_volume_volume_ratio ?? row.near_breakout_volume_ratio ?? row.current_volume_ratio ?? row.recent3_volume_ratio ?? row.avg5_volume_ratio),
       returnPct: getNumber(row.total_return),
       totalTrades: getNumber(row.total_trades),
-      positiveReasons: firstStringList(row.positive_reasons, row.pullback_positive_reasons, row.vcp_positive_reasons, row.high_price_pullback_positive_reasons),
-      cautionReasons: firstStringList(row.caution_reasons, row.pullback_caution_reasons, row.vcp_caution_reasons, row.high_price_pullback_caution_reasons)
+      positiveReasons: firstStringList(row.bowl_volume_positive_reasons, row.near_breakout_positive_reasons, row.positive_reasons, row.pullback_positive_reasons, row.vcp_positive_reasons, row.high_price_pullback_positive_reasons),
+      cautionReasons: firstStringList(row.bowl_volume_caution_reasons, row.near_breakout_caution_reasons, row.caution_reasons, row.pullback_caution_reasons, row.vcp_caution_reasons, row.high_price_pullback_caution_reasons)
     };
   });
 }
