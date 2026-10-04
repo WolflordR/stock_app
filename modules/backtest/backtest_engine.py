@@ -2,6 +2,8 @@ import logging
 import time
 from functools import lru_cache
 
+import pandas as pd
+
 from modules.backtest.performance_metrics import build_equity_curve, build_performance_summary
 from modules.backtest.signals.registry import evaluate_registered_buy_strategies
 from modules.backtest.signals.sell_registry import evaluate_registered_sell_strategies
@@ -138,6 +140,7 @@ def _build_trade_record(*, buy_date, buy_price, sell_date, sell_price, trading_c
         "high_price_pullback_latest_close": active_setup.get("high_price_pullback_latest_close"),
         "near_breakout_score": active_setup.get("near_breakout_score"),
         "bowl_volume_score": active_setup.get("bowl_volume_score"),
+        "momentum_volume_score": active_setup.get("momentum_volume_score"),
     }
 
 
@@ -201,6 +204,13 @@ def check_stock(
     bowl_volume_signal_window_days=3,
     bowl_volume_multiplier=2.0,
     bowl_volume_trend_lookback_days=10,
+    momentum_volume_ma_short=5,
+    momentum_volume_ma_long=10,
+    momentum_volume_momentum_lookback=5,
+    momentum_volume_ma_slope_lookback=3,
+    momentum_volume_volume_ma_period=20,
+    momentum_volume_volume_multiplier=2.0,
+    momentum_volume_volume_lookback=3,
     history_buffer_days=120,
 ):
     try:
@@ -267,6 +277,13 @@ def check_stock(
             "bowl_volume_signal_window_days": bowl_volume_signal_window_days,
             "bowl_volume_multiplier": bowl_volume_multiplier,
             "bowl_volume_trend_lookback_days": bowl_volume_trend_lookback_days,
+            "momentum_volume_ma_short": momentum_volume_ma_short,
+            "momentum_volume_ma_long": momentum_volume_ma_long,
+            "momentum_volume_momentum_lookback": momentum_volume_momentum_lookback,
+            "momentum_volume_ma_slope_lookback": momentum_volume_ma_slope_lookback,
+            "momentum_volume_volume_ma_period": momentum_volume_volume_ma_period,
+            "momentum_volume_volume_multiplier": momentum_volume_volume_multiplier,
+            "momentum_volume_volume_lookback": momentum_volume_volume_lookback,
             "stock_id": stock_id,
         }
 
@@ -279,7 +296,7 @@ def check_stock(
             max_high = 0
             active_setup = {}
 
-            target_start_dt = df.index.searchsorted(start_date)
+            target_start_dt = df.index.searchsorted(pd.to_datetime(start_date))
             if target_start_dt >= len(df):
                 return None
 
@@ -487,6 +504,35 @@ def check_stock(
                 "bowl_volume_bottom_span_days": buy_setup.get("bowl_volume_bottom_span_days"),
                 "bowl_volume_positive_reasons": buy_setup.get("bowl_volume_positive_reasons") or [],
                 "bowl_volume_caution_reasons": buy_setup.get("bowl_volume_caution_reasons") or [],
+                "momentum_volume_score": buy_setup.get("momentum_volume_score"),
+                "momentum_volume_latest_close": buy_setup.get("momentum_volume_latest_close"),
+                "momentum_volume_price_change_pct": buy_setup.get("momentum_volume_price_change_pct"),
+                "momentum_volume_ma_short": buy_setup.get("momentum_volume_ma_short"),
+                "momentum_volume_ma_long": buy_setup.get("momentum_volume_ma_long"),
+                "momentum_volume_ma_short_period": buy_setup.get("momentum_volume_ma_short_period"),
+                "momentum_volume_ma_long_period": buy_setup.get("momentum_volume_ma_long_period"),
+                "momentum_volume_return_5d_pct": buy_setup.get("momentum_volume_return_5d_pct"),
+                "momentum_volume_latest_volume": buy_setup.get("momentum_volume_latest_volume"),
+                "momentum_volume_avg_volume_20d": buy_setup.get("momentum_volume_avg_volume_20d"),
+                "momentum_volume_ratio_today": buy_setup.get("momentum_volume_ratio_today"),
+                "momentum_volume_ratio_max_3d": buy_setup.get("momentum_volume_ratio_max_3d"),
+                "momentum_volume_ratio_avg_3d": buy_setup.get("momentum_volume_ratio_avg_3d"),
+                "momentum_volume_signal_date": buy_setup.get("momentum_volume_signal_date"),
+                "momentum_volume_signal_volume": buy_setup.get("momentum_volume_signal_volume"),
+                "momentum_volume_signal_avg_volume_20d": buy_setup.get("momentum_volume_signal_avg_volume_20d"),
+                "momentum_volume_signal_ratio": buy_setup.get("momentum_volume_signal_ratio"),
+                "momentum_volume_signal_price_change_pct": buy_setup.get("momentum_volume_signal_price_change_pct"),
+                "momentum_volume_days_since_signal": buy_setup.get("momentum_volume_days_since_signal"),
+                "momentum_volume_momentum_up": buy_setup.get("momentum_volume_momentum_up"),
+                "momentum_volume_volume_confirmed": buy_setup.get("momentum_volume_volume_confirmed"),
+                "momentum_volume_price_up": buy_setup.get("momentum_volume_price_up"),
+                "momentum_volume_distance_from_ma5_pct": buy_setup.get("momentum_volume_distance_from_ma5_pct"),
+                "momentum_volume_distance_from_ma10_pct": buy_setup.get("momentum_volume_distance_from_ma10_pct"),
+                "momentum_volume_ma5_slope_pct": buy_setup.get("momentum_volume_ma5_slope_pct"),
+                "momentum_volume_return_3d_pct": buy_setup.get("momentum_volume_return_3d_pct"),
+                "momentum_volume_return_10d_pct": buy_setup.get("momentum_volume_return_10d_pct"),
+                "momentum_volume_positive_reasons": buy_setup.get("momentum_volume_positive_reasons") or [],
+                "momentum_volume_caution_reasons": buy_setup.get("momentum_volume_caution_reasons") or [],
             }
         return None
     except Exception as exc:
@@ -501,6 +547,7 @@ def _sort_scan_results(results):
             return 0.0
         for key in (
             "bowl_volume_score",
+            "momentum_volume_score",
             "near_breakout_score",
             "pullback_score",
             "high_price_pullback_score",
@@ -582,6 +629,13 @@ def scan_market(
     bowl_volume_signal_window_days=3,
     bowl_volume_multiplier=2.0,
     bowl_volume_trend_lookback_days=10,
+    momentum_volume_ma_short=5,
+    momentum_volume_ma_long=10,
+    momentum_volume_momentum_lookback=5,
+    momentum_volume_ma_slope_lookback=3,
+    momentum_volume_volume_ma_period=20,
+    momentum_volume_volume_multiplier=2.0,
+    momentum_volume_volume_lookback=3,
     progress_callback=None,
     status_callback=None,
 ):
@@ -683,6 +737,13 @@ def scan_market(
             bowl_volume_signal_window_days,
             bowl_volume_multiplier,
             bowl_volume_trend_lookback_days,
+            momentum_volume_ma_short,
+            momentum_volume_ma_long,
+            momentum_volume_momentum_lookback,
+            momentum_volume_ma_slope_lookback,
+            momentum_volume_volume_ma_period,
+            momentum_volume_volume_multiplier,
+            momentum_volume_volume_lookback,
             history_buffer_days,
         )
 

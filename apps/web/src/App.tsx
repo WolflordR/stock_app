@@ -125,6 +125,13 @@ type BacktestTuningParams = {
   bowl_volume_signal_window_days: number;
   bowl_volume_multiplier: number;
   bowl_volume_trend_lookback_days: number;
+  momentum_volume_ma_short: number;
+  momentum_volume_ma_long: number;
+  momentum_volume_momentum_lookback: number;
+  momentum_volume_ma_slope_lookback: number;
+  momentum_volume_volume_ma_period: number;
+  momentum_volume_volume_multiplier: number;
+  momentum_volume_volume_lookback: number;
 };
 
 const defaultBacktestParams: BacktestTuningParams = {
@@ -163,7 +170,14 @@ const defaultBacktestParams: BacktestTuningParams = {
   bowl_volume_volume_lookback_days: 20,
   bowl_volume_signal_window_days: 3,
   bowl_volume_multiplier: 2,
-  bowl_volume_trend_lookback_days: 10
+  bowl_volume_trend_lookback_days: 10,
+  momentum_volume_ma_short: 5,
+  momentum_volume_ma_long: 10,
+  momentum_volume_momentum_lookback: 5,
+  momentum_volume_ma_slope_lookback: 3,
+  momentum_volume_volume_ma_period: 20,
+  momentum_volume_volume_multiplier: 2,
+  momentum_volume_volume_lookback: 3
 };
 
 const navItems: { key: ViewKey; label: string; icon: ReactNode }[] = [
@@ -1959,6 +1973,17 @@ function BacktestParamPanel({
             <ParamNumber label="近期趨勢天數" value={params.bowl_volume_trend_lookback_days} min={3} max={120} onValueChange={(value) => onParamsChange({ bowl_volume_trend_lookback_days: value })} />
           </>
         ) : null}
+        {strategy === "動能向上＋量價配合" ? (
+          <>
+            <ParamNumber label="短均線 MA" value={params.momentum_volume_ma_short} min={1} max={120} onValueChange={(value) => onParamsChange({ momentum_volume_ma_short: value })} />
+            <ParamNumber label="長均線 MA" value={params.momentum_volume_ma_long} min={2} max={260} onValueChange={(value) => onParamsChange({ momentum_volume_ma_long: value })} />
+            <ParamNumber label="動能報酬天數" value={params.momentum_volume_momentum_lookback} min={1} max={120} onValueChange={(value) => onParamsChange({ momentum_volume_momentum_lookback: value })} />
+            <ParamNumber label="均線上彎天數" value={params.momentum_volume_ma_slope_lookback} min={1} max={60} onValueChange={(value) => onParamsChange({ momentum_volume_ma_slope_lookback: value })} />
+            <ParamNumber label="均量基準天數" value={params.momentum_volume_volume_ma_period} min={2} max={260} onValueChange={(value) => onParamsChange({ momentum_volume_volume_ma_period: value })} />
+            <ParamDecimal label="放量倍數" value={params.momentum_volume_volume_multiplier} min={0.1} max={20} onValueChange={(value) => onParamsChange({ momentum_volume_volume_multiplier: value })} />
+            <ParamNumber label="放量觀察天數" value={params.momentum_volume_volume_lookback} min={1} max={30} onValueChange={(value) => onParamsChange({ momentum_volume_volume_lookback: value })} />
+          </>
+        ) : null}
         <ParamNumber label="盤整天數" value={params.range_lookback_days} min={5} max={260} onValueChange={(value) => onParamsChange({ range_lookback_days: value })} />
         <ParamDecimal label="盤整最大寬度 %" value={params.range_max_width_pct} min={1} max={200} onValueChange={(value) => onParamsChange({ range_max_width_pct: value })} />
         <ParamDecimal label="量增倍率" value={params.range_volume_ratio} min={0.1} max={10} onValueChange={(value) => onParamsChange({ range_volume_ratio: value })} />
@@ -2009,16 +2034,16 @@ function normalizeBacktestResults(preview: BacktestJob["result_preview"]): Backt
       code,
       name: getString(row.name) || code,
       price: getNumber(row.price ?? row.ending_capital),
-      score: getNumber(row.bowl_volume_score ?? row.near_breakout_score ?? row.pullback_score ?? row.high_price_pullback_score ?? row.vcp_score ?? row.bowl_score),
+      score: getNumber(row.bowl_volume_score ?? row.momentum_volume_score ?? row.near_breakout_score ?? row.pullback_score ?? row.high_price_pullback_score ?? row.vcp_score ?? row.bowl_score),
       rsSpreadPct: getNumber(row.rs_spread_pct ?? row.avg_buy_rs_spread),
-      volumeRatio: getNumber(row.bowl_volume_signal_ratio ?? row.bowl_volume_volume_ratio ?? row.near_breakout_volume_ratio ?? row.current_volume_ratio ?? row.recent3_volume_ratio ?? row.avg5_volume_ratio),
-      volumeSignalDate: getString(row.bowl_volume_signal_date),
-      volumeSignalPriceChangePct: getNumber(row.bowl_volume_signal_price_change_pct),
-      daysSinceVolumeSignal: getNumber(row.bowl_volume_days_since_volume_signal),
+      volumeRatio: getNumber(row.bowl_volume_signal_ratio ?? row.momentum_volume_signal_ratio ?? row.momentum_volume_ratio_max_3d ?? row.bowl_volume_volume_ratio ?? row.near_breakout_volume_ratio ?? row.current_volume_ratio ?? row.recent3_volume_ratio ?? row.avg5_volume_ratio),
+      volumeSignalDate: getString(row.bowl_volume_signal_date ?? row.momentum_volume_signal_date),
+      volumeSignalPriceChangePct: getNumber(row.bowl_volume_signal_price_change_pct ?? row.momentum_volume_signal_price_change_pct),
+      daysSinceVolumeSignal: getNumber(row.bowl_volume_days_since_volume_signal ?? row.momentum_volume_days_since_signal),
       returnPct: getNumber(row.total_return),
       totalTrades: getNumber(row.total_trades),
-      positiveReasons: firstStringList(row.bowl_volume_positive_reasons, row.near_breakout_positive_reasons, row.positive_reasons, row.pullback_positive_reasons, row.vcp_positive_reasons, row.high_price_pullback_positive_reasons),
-      cautionReasons: firstStringList(row.bowl_volume_caution_reasons, row.near_breakout_caution_reasons, row.caution_reasons, row.pullback_caution_reasons, row.vcp_caution_reasons, row.high_price_pullback_caution_reasons)
+      positiveReasons: firstStringList(row.bowl_volume_positive_reasons, row.momentum_volume_positive_reasons, row.near_breakout_positive_reasons, row.positive_reasons, row.pullback_positive_reasons, row.vcp_positive_reasons, row.high_price_pullback_positive_reasons),
+      cautionReasons: firstStringList(row.bowl_volume_caution_reasons, row.momentum_volume_caution_reasons, row.near_breakout_caution_reasons, row.caution_reasons, row.pullback_caution_reasons, row.vcp_caution_reasons, row.high_price_pullback_caution_reasons)
     };
   });
 }

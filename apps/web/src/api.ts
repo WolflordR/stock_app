@@ -203,6 +203,13 @@ export type BacktestStartPayload = {
   bowl_volume_signal_window_days?: number;
   bowl_volume_multiplier?: number;
   bowl_volume_trend_lookback_days?: number;
+  momentum_volume_ma_short?: number;
+  momentum_volume_ma_long?: number;
+  momentum_volume_momentum_lookback?: number;
+  momentum_volume_ma_slope_lookback?: number;
+  momentum_volume_volume_ma_period?: number;
+  momentum_volume_volume_multiplier?: number;
+  momentum_volume_volume_lookback?: number;
 };
 
 export function startBacktestJob(payload: BacktestStartPayload): Promise<BacktestJobResponse> {

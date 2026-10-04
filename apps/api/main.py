@@ -188,6 +188,13 @@ if app is not None:
         bowl_volume_signal_window_days: int = Field(default=3, ge=1, le=10)
         bowl_volume_multiplier: float = Field(default=2.0, ge=0.1, le=20)
         bowl_volume_trend_lookback_days: int = Field(default=10, ge=3, le=120)
+        momentum_volume_ma_short: int = Field(default=5, ge=1, le=120)
+        momentum_volume_ma_long: int = Field(default=10, ge=2, le=260)
+        momentum_volume_momentum_lookback: int = Field(default=5, ge=1, le=120)
+        momentum_volume_ma_slope_lookback: int = Field(default=3, ge=1, le=60)
+        momentum_volume_volume_ma_period: int = Field(default=20, ge=2, le=260)
+        momentum_volume_volume_multiplier: float = Field(default=2.0, ge=0.1, le=20)
+        momentum_volume_volume_lookback: int = Field(default=3, ge=1, le=30)
 
         def to_scan_request(self) -> BacktestScanRequest:
             today = date.today()
@@ -237,6 +244,13 @@ if app is not None:
                 bowl_volume_signal_window_days=self.bowl_volume_signal_window_days,
                 bowl_volume_multiplier=self.bowl_volume_multiplier,
                 bowl_volume_trend_lookback_days=self.bowl_volume_trend_lookback_days,
+                momentum_volume_ma_short=self.momentum_volume_ma_short,
+                momentum_volume_ma_long=self.momentum_volume_ma_long,
+                momentum_volume_momentum_lookback=self.momentum_volume_momentum_lookback,
+                momentum_volume_ma_slope_lookback=self.momentum_volume_ma_slope_lookback,
+                momentum_volume_volume_ma_period=self.momentum_volume_volume_ma_period,
+                momentum_volume_volume_multiplier=self.momentum_volume_volume_multiplier,
+                momentum_volume_volume_lookback=self.momentum_volume_volume_lookback,
             )
 
     class NewsStartRequest(BaseModel):

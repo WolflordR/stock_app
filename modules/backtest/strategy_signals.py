@@ -15,6 +15,7 @@ from modules.backtest.signals.basic import (
     strategy_volume_surge,
 )
 from modules.backtest.signals.gap import strategy_gap_support_rebound
+from modules.backtest.signals.momentum_volume import analyze_momentum_volume_candidate, strategy_momentum_volume
 from modules.backtest.signals.pullback import (
     analyze_high_price_pullback_candidate,
     analyze_strong_pullback_rebound_candidate,

@@ -67,6 +67,13 @@ class BacktestScanRequest:
     bowl_volume_signal_window_days: int = 3
     bowl_volume_multiplier: float = 2.0
     bowl_volume_trend_lookback_days: int = 10
+    momentum_volume_ma_short: int = 5
+    momentum_volume_ma_long: int = 10
+    momentum_volume_momentum_lookback: int = 5
+    momentum_volume_ma_slope_lookback: int = 3
+    momentum_volume_volume_ma_period: int = 20
+    momentum_volume_volume_multiplier: float = 2.0
+    momentum_volume_volume_lookback: int = 3
 
     @classmethod
     def from_sidebar_state(cls, state: dict[str, Any]) -> "BacktestScanRequest":
@@ -131,6 +138,13 @@ class BacktestScanRequest:
             bowl_volume_signal_window_days=int(state.get("bowl_volume_signal_window_days", 3)),
             bowl_volume_multiplier=float(state.get("bowl_volume_multiplier", 2.0)),
             bowl_volume_trend_lookback_days=int(state.get("bowl_volume_trend_lookback_days", 10)),
+            momentum_volume_ma_short=int(state.get("momentum_volume_ma_short", 5)),
+            momentum_volume_ma_long=int(state.get("momentum_volume_ma_long", 10)),
+            momentum_volume_momentum_lookback=int(state.get("momentum_volume_momentum_lookback", 5)),
+            momentum_volume_ma_slope_lookback=int(state.get("momentum_volume_ma_slope_lookback", 3)),
+            momentum_volume_volume_ma_period=int(state.get("momentum_volume_volume_ma_period", 20)),
+            momentum_volume_volume_multiplier=float(state.get("momentum_volume_volume_multiplier", 2.0)),
+            momentum_volume_volume_lookback=int(state.get("momentum_volume_volume_lookback", 3)),
         )
 
     def to_engine_kwargs(self) -> dict[str, Any]:

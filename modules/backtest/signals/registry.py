@@ -13,6 +13,7 @@ from modules.backtest.signals.basic import (
     strategy_volume_surge,
 )
 from modules.backtest.signals.gap import strategy_gap_support_rebound
+from modules.backtest.signals.momentum_volume import analyze_momentum_volume_candidate
 from modules.backtest.signals.pullback import (
     analyze_high_price_pullback_candidate,
     analyze_strong_pullback_rebound_candidate,
@@ -230,6 +231,53 @@ def _evaluate_bowl_bottom_volume(df, _benchmark_df, params):
     }
 
 
+def _evaluate_momentum_volume(df, _benchmark_df, params):
+    setup = analyze_momentum_volume_candidate(
+        df,
+        ma_short=_param(params, "momentum_volume_ma_short", 5),
+        ma_long=_param(params, "momentum_volume_ma_long", 10),
+        momentum_lookback=_param(params, "momentum_volume_momentum_lookback", 5),
+        ma_slope_lookback=_param(params, "momentum_volume_ma_slope_lookback", 3),
+        volume_ma_period=_param(params, "momentum_volume_volume_ma_period", 20),
+        volume_multiplier=_param(params, "momentum_volume_volume_multiplier", 2.0),
+        volume_lookback=_param(params, "momentum_volume_volume_lookback", 3),
+        stock_id=_param(params, "stock_id"),
+    )
+    if not setup:
+        return False, {}
+    return bool(setup.get("matched", False)), {
+        "momentum_volume_score": setup.get("score"),
+        "momentum_volume_latest_close": setup.get("latest_close"),
+        "momentum_volume_price_change_pct": setup.get("price_change_pct"),
+        "momentum_volume_ma_short": setup.get("ma_short"),
+        "momentum_volume_ma_long": setup.get("ma_long"),
+        "momentum_volume_ma_short_period": setup.get("ma_short_period"),
+        "momentum_volume_ma_long_period": setup.get("ma_long_period"),
+        "momentum_volume_return_5d_pct": setup.get("return_5d_pct"),
+        "momentum_volume_latest_volume": setup.get("latest_volume"),
+        "momentum_volume_avg_volume_20d": setup.get("avg_volume"),
+        "momentum_volume_ratio_today": setup.get("volume_ratio_today"),
+        "momentum_volume_ratio_max_3d": setup.get("volume_ratio_max"),
+        "momentum_volume_ratio_avg_3d": setup.get("volume_ratio_avg"),
+        "momentum_volume_signal_date": setup.get("volume_signal_date"),
+        "momentum_volume_signal_volume": setup.get("volume_signal_volume"),
+        "momentum_volume_signal_avg_volume_20d": setup.get("volume_signal_avg_volume"),
+        "momentum_volume_signal_ratio": setup.get("volume_signal_ratio"),
+        "momentum_volume_signal_price_change_pct": setup.get("volume_signal_price_change_pct"),
+        "momentum_volume_days_since_signal": setup.get("days_since_volume_signal"),
+        "momentum_volume_momentum_up": setup.get("momentum_up"),
+        "momentum_volume_volume_confirmed": setup.get("volume_confirmed"),
+        "momentum_volume_price_up": setup.get("price_up"),
+        "momentum_volume_distance_from_ma5_pct": setup.get("distance_from_ma_short_pct"),
+        "momentum_volume_distance_from_ma10_pct": setup.get("distance_from_ma_long_pct"),
+        "momentum_volume_ma5_slope_pct": setup.get("ma_short_slope_pct"),
+        "momentum_volume_return_3d_pct": setup.get("return_3d_pct"),
+        "momentum_volume_return_10d_pct": setup.get("return_10d_pct"),
+        "momentum_volume_positive_reasons": setup.get("positive_reasons") or [],
+        "momentum_volume_caution_reasons": setup.get("caution_reasons") or [],
+    }
+
+
 def _evaluate_relative_strength(df, benchmark_df, params):
     matched, rs_spread_pct = strategy_relative_strength_filter(
         df,
@@ -268,6 +316,7 @@ BUY_STRATEGY_REGISTRY = {
     "高價股回檔": _evaluate_high_price_pullback,
     "接近前高／即將突破": _evaluate_near_breakout,
     "碗形底＋帶量向上": _evaluate_bowl_bottom_volume,
+    "動能向上＋量價配合": _evaluate_momentum_volume,
     "相對強弱濾網": _evaluate_relative_strength,
     "W底反彈": _evaluate_w_bottom,
 }
@@ -313,6 +362,8 @@ def get_buy_strategy_history_buffer_days(selected_strategies, selected_sell_stra
         history_buffer_days = max(history_buffer_days, 320)
     if "碗形底＋帶量向上" in selected_strategies:
         history_buffer_days = max(history_buffer_days, 220)
+    if "動能向上＋量價配合" in selected_strategies:
+        history_buffer_days = max(history_buffer_days, 90)
     if "相對強弱濾網" in selected_strategies:
         history_buffer_days = max(history_buffer_days, rs_lookback_days + 90)
 
