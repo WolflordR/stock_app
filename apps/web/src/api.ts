@@ -207,6 +207,7 @@ export type BacktestStartPayload = {
   initial_capital?: number;
   trading_cost_pct?: number;
   initial_stop_loss_pct?: number;
+  min_turnover_value?: number;
   trailing_stop_activation_pct?: number;
   trailing_stop_drawdown_pct?: number;
   pullback_strong_lookback_days?: number;

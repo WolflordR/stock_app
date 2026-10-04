@@ -162,6 +162,7 @@ if app is not None:
         initial_capital: int = Field(default=100000, ge=1000, le=1000000000)
         trading_cost_pct: float = Field(default=0.7, ge=0, le=10)
         initial_stop_loss_pct: float = Field(default=5.0, ge=0.1, le=80)
+        min_turnover_value: float = Field(default=100000000.0, ge=0, le=1000000000000)
         trailing_stop_activation_pct: float = Field(default=8.0, ge=0.1, le=200)
         trailing_stop_drawdown_pct: float = Field(default=8.0, ge=0.1, le=80)
         pullback_strong_lookback_days: int = Field(default=20, ge=5, le=260)
@@ -218,6 +219,7 @@ if app is not None:
                 initial_capital=self.initial_capital,
                 trading_cost_pct=self.trading_cost_pct,
                 initial_stop_loss_pct=self.initial_stop_loss_pct,
+                min_turnover_value=self.min_turnover_value,
                 trailing_stop_activation_pct=self.trailing_stop_activation_pct,
                 trailing_stop_drawdown_pct=self.trailing_stop_drawdown_pct,
                 pullback_strong_lookback_days=self.pullback_strong_lookback_days,

@@ -106,6 +106,7 @@ type BacktestTuningParams = {
   initial_capital: number;
   trading_cost_pct: number;
   initial_stop_loss_pct: number;
+  min_turnover_value: number;
   trailing_stop_activation_pct: number;
   trailing_stop_drawdown_pct: number;
   pullback_strong_lookback_days: number;
@@ -152,6 +153,7 @@ const defaultBacktestParams: BacktestTuningParams = {
   initial_capital: 100000,
   trading_cost_pct: 0.7,
   initial_stop_loss_pct: 5,
+  min_turnover_value: 100000000,
   trailing_stop_activation_pct: 8,
   trailing_stop_drawdown_pct: 8,
   pullback_strong_lookback_days: 20,
@@ -2220,6 +2222,7 @@ function BacktestParamPanel({
         <ParamDecimal label="盤整最大寬度 %" value={params.range_max_width_pct} min={1} max={200} onValueChange={(value) => onParamsChange({ range_max_width_pct: value })} />
         <ParamDecimal label="量增倍率" value={params.range_volume_ratio} min={0.1} max={10} onValueChange={(value) => onParamsChange({ range_volume_ratio: value })} />
         <ParamNumber label="量增連續天數" value={params.range_volume_sustain_days} min={1} max={30} onValueChange={(value) => onParamsChange({ range_volume_sustain_days: value })} />
+        <ParamNumber label="最小成交值" value={params.min_turnover_value} min={0} max={1000000000000} onValueChange={(value) => onParamsChange({ min_turnover_value: value })} />
         {mode === "歷史回測" ? (
           <>
             <ParamNumber label="初始資金" value={params.initial_capital} min={1000} max={1000000000} onValueChange={(value) => onParamsChange({ initial_capital: value })} />

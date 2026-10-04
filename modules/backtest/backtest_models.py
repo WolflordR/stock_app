@@ -23,6 +23,7 @@ class BacktestScanRequest:
     initial_capital: int = 100000
     trading_cost_pct: float = 0.7
     initial_stop_loss_pct: float = 5.0
+    min_turnover_value: float = 100000000.0
     w_bottom_lookback_days: int = 40
     w_bottom_tolerance_pct: float = 3.0
     w_bottom_min_rebound_pct: float = 5.0
@@ -94,6 +95,7 @@ class BacktestScanRequest:
             initial_capital=int(state["initial_capital"]),
             trading_cost_pct=float(state["trading_cost_pct"]),
             initial_stop_loss_pct=float(state["initial_stop_loss_pct"]),
+            min_turnover_value=float(state.get("min_turnover_value", 100000000.0)),
             w_bottom_lookback_days=int(state["w_bottom_lookback_days"]),
             w_bottom_tolerance_pct=float(state["w_bottom_tolerance_pct"]),
             w_bottom_min_rebound_pct=float(state["w_bottom_min_rebound_pct"]),

@@ -141,7 +141,19 @@ def _build_trade_record(*, buy_date, buy_price, sell_date, sell_price, trading_c
         "near_breakout_score": active_setup.get("near_breakout_score"),
         "bowl_volume_score": active_setup.get("bowl_volume_score"),
         "momentum_volume_score": active_setup.get("momentum_volume_score"),
+        "buy_turnover_value": active_setup.get("turnover_value"),
     }
+
+
+def _estimate_turnover_value(row):
+    try:
+        close_price = float(row["Close"])
+        volume = float(row["Volume"])
+    except (KeyError, TypeError, ValueError):
+        return 0.0
+    if close_price <= 0 or volume <= 0:
+        return 0.0
+    return close_price * volume
 
 
 def check_stock(
@@ -161,6 +173,7 @@ def check_stock(
     initial_capital=100000,
     trading_cost_pct=0.7,
     initial_stop_loss_pct=5.0,
+    min_turnover_value=100000000.0,
     w_bottom_lookback_days=40,
     w_bottom_tolerance_pct=3.0,
     w_bottom_min_rebound_pct=5.0,
@@ -306,6 +319,9 @@ def check_stock(
                 current_row = df.iloc[i]
 
                 if not in_position:
+                    turnover_value = _estimate_turnover_value(current_row)
+                    if turnover_value < min_turnover_value:
+                        continue
                     matched, buy_setup = evaluate_registered_buy_strategies(
                         current_slice,
                         selected_strategies,
@@ -319,6 +335,7 @@ def check_stock(
                         days_held = 0
                         max_high = current_row["High"]
                         active_setup = buy_setup.copy()
+                        active_setup["turnover_value"] = round(turnover_value)
                 else:
                     days_held += 1
                     if current_row["High"] > max_high:
@@ -418,11 +435,15 @@ def check_stock(
         )
         if matched:
             latest_volume = float(df["Volume"].iloc[-1]) if "Volume" in df.columns else 0.0
+            latest_turnover_value = _estimate_turnover_value(df.iloc[-1])
+            if latest_turnover_value < min_turnover_value:
+                return None
             return {
                 "name": get_chinese_name(stock_id),
                 "price": round(float(df["Close"].iloc[-1]), 2),
                 "rs_spread_pct": buy_setup.get("rs_spread_pct"),
                 "latest_volume": round(latest_volume),
+                "turnover_value": round(latest_turnover_value),
                 "avg_volume_3": buy_setup.get("avg_volume_3"),
                 "avg_volume_prev3": buy_setup.get("avg_volume_prev3"),
                 "avg_volume_20": buy_setup.get("avg_volume_20"),
@@ -585,6 +606,7 @@ def scan_market(
     initial_capital=100000,
     trading_cost_pct=0.7,
     initial_stop_loss_pct=5.0,
+    min_turnover_value=100000000.0,
     w_bottom_lookback_days=40,
     w_bottom_tolerance_pct=3.0,
     w_bottom_min_rebound_pct=5.0,
@@ -694,6 +716,7 @@ def scan_market(
             initial_capital,
             trading_cost_pct,
             initial_stop_loss_pct,
+            min_turnover_value,
             w_bottom_lookback_days,
             w_bottom_tolerance_pct,
             w_bottom_min_rebound_pct,
