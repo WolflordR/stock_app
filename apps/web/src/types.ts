@@ -256,6 +256,31 @@ export type StockOverview = StockDetail & {
   monthly_revenue: MonthlyRevenueRow[];
 };
 
+export type WatchlistGroup = {
+  id: number;
+  name: string;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+  item_count: number;
+};
+
+export type WatchlistItem = {
+  group_id: number;
+  stock_code: string;
+  stock_name: string | null;
+  symbol: string | null;
+  note: string | null;
+  added_at: string;
+  updated_at: string;
+};
+
+export type WatchlistsOverview = {
+  groups: WatchlistGroup[];
+  selected_group_id: number | null;
+  items: WatchlistItem[];
+};
+
 export type StrongStockRow = {
   symbol: string;
   code: string;

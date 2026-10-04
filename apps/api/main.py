@@ -48,6 +48,7 @@ from modules.data_sources.official_broker_import import get_official_broker_db_o
 from modules.data_sources.stock_db import find_security, get_securities_in_range, get_stock_db_status
 from modules.market_map.market_map_db import get_market_map_status
 from modules.core.job_managers import BackgroundDataJobManager, BacktestJobManager
+from modules.watchlist_store import add_watchlist_item, create_watchlist_group, get_watchlists, remove_watchlist_item
 from apps.worker.update_price_cache import update_stocks
 from packages.trade_core.data_files import ALL_DB_FILES, DATA_CONFIG_FILES
 
@@ -281,6 +282,15 @@ if app is not None:
                 return [item["yfinance_symbol"] for item in get_securities_in_range(start_code, end_code)]
             return [item["yfinance_symbol"] for item in get_securities_in_range(0, 9999)]
 
+    class WatchlistGroupRequest(BaseModel):
+        name: str = Field(default="想多看", min_length=1, max_length=80)
+
+    class WatchlistItemRequest(BaseModel):
+        stock_code: str = Field(min_length=1, max_length=20)
+        group_id: int | None = Field(default=None, ge=1)
+        group_name: str | None = Field(default=None, max_length=80)
+        note: str | None = Field(default=None, max_length=300)
+
     def _start_web_bootstrap_price_job() -> dict[str, object]:
         if not SETTINGS.web_bootstrap_price_enabled:
             return {"ok": True, "started": False, "reason": "web bootstrap price update is disabled", "job": None}
@@ -402,6 +412,27 @@ if app is not None:
     @app.get("/api/stocks/{stock_id}/overview")
     def stock_overview(stock_id: str) -> dict[str, object]:
         return build_stock_overview(stock_id)
+
+    @app.get("/api/watchlists")
+    def watchlists(group_id: int | None = Query(default=None, ge=1)) -> dict[str, object]:
+        return get_watchlists(group_id=group_id)
+
+    @app.post("/api/watchlists/groups")
+    def create_watchlist_group_api(request_body: WatchlistGroupRequest) -> dict[str, object]:
+        return create_watchlist_group(request_body.name)
+
+    @app.post("/api/watchlists/items")
+    def add_watchlist_item_api(request_body: WatchlistItemRequest) -> dict[str, object]:
+        return add_watchlist_item(
+            request_body.stock_code,
+            group_id=request_body.group_id,
+            group_name=request_body.group_name,
+            note=request_body.note,
+        )
+
+    @app.delete("/api/watchlists/groups/{group_id}/items/{stock_code}")
+    def remove_watchlist_item_api(group_id: int, stock_code: str) -> dict[str, object]:
+        return remove_watchlist_item(group_id, stock_code)
 
     @app.get("/api/stocks/{stock_id}/quotes")
     def stock_quotes(stock_id: str, limit: int = Query(default=1260, ge=1, le=1500)) -> dict[str, object]:

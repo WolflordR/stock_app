@@ -1291,6 +1291,163 @@ h1 {
   grid-template-columns: minmax(110px, 1fr) 64px 92px 86px 86px minmax(160px, 1.3fr);
 }
 
+.favorite-control {
+  display: grid;
+  grid-template-columns: auto minmax(120px, 190px) auto;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0;
+  padding: 8px;
+  border: 1px solid rgba(236, 241, 244, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.favorite-control svg {
+  color: #f2c36b;
+}
+
+.favorite-control select,
+.watchlist-create input {
+  min-width: 0;
+  height: 34px;
+  border: 1px solid rgba(236, 241, 244, 0.12);
+  border-radius: 8px;
+  background: rgba(19, 23, 34, 0.86);
+  color: #ecf1f4;
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 800;
+  outline: none;
+  padding: 0 10px;
+}
+
+.favorite-control button,
+.watchlist-create button,
+.icon-danger-button {
+  display: inline-grid;
+  place-items: center;
+  min-height: 34px;
+  border: 1px solid rgba(236, 241, 244, 0.12);
+  border-radius: 8px;
+  background: rgba(111, 231, 197, 0.12);
+  color: #ecf1f4;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 900;
+  padding: 0 12px;
+}
+
+.favorite-control button:hover,
+.watchlist-create button:hover {
+  border-color: rgba(111, 231, 197, 0.42);
+  background: rgba(111, 231, 197, 0.2);
+}
+
+.favorite-control button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.watchlist-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.34fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.watchlist-sidebar,
+.watchlist-items {
+  min-width: 0;
+}
+
+.watchlist-create {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 38px;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.watchlist-create button {
+  padding: 0;
+}
+
+.watchlist-group-list {
+  display: grid;
+  gap: 8px;
+}
+
+.watchlist-group-list button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 42px;
+  border: 1px solid rgba(236, 241, 244, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+  color: #ecf1f4;
+  cursor: pointer;
+  font: inherit;
+  padding: 0 10px;
+  text-align: left;
+}
+
+.watchlist-group-list button.active,
+.watchlist-group-list button:hover {
+  border-color: rgba(111, 231, 197, 0.4);
+  background: rgba(111, 231, 197, 0.1);
+}
+
+.watchlist-group-list span {
+  color: #aeb8be;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.watchlist-table {
+  display: grid;
+  gap: 8px;
+}
+
+.watchlist-table .watchlist-row {
+  grid-template-columns: minmax(140px, 1fr) 96px 42px;
+}
+
+.watchlist-stock-button {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-align: left;
+}
+
+.watchlist-stock-button strong,
+.watchlist-stock-button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.icon-danger-button {
+  width: 34px;
+  min-height: 34px;
+  padding: 0;
+  background: rgba(255, 95, 109, 0.12);
+  color: #ff9aa4;
+}
+
+.icon-danger-button:hover {
+  border-color: rgba(255, 95, 109, 0.42);
+  background: rgba(255, 95, 109, 0.2);
+}
+
 .stock-revenue-block {
   display: grid;
   gap: 10px;
@@ -2111,6 +2268,18 @@ h1 {
   .calendar-controls,
   .data-source-grid {
     grid-template-columns: 1fr;
+  }
+
+  .watchlist-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .favorite-control {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .favorite-control button {
+    grid-column: 1 / -1;
   }
 
   .dense-row,

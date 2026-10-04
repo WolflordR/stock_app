@@ -13,6 +13,7 @@ data/chip_cache.db
 data/active_etf_history.db
 data/broker_daily_trades.db
 data/api_jobs.db
+data/watchlists.db
 data/raw/
 logs/
 backups/

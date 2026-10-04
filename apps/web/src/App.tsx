@@ -12,12 +12,15 @@ import {
   Layers3,
   Newspaper,
   PieChart,
+  Plus,
   RefreshCw,
   Search,
   Server,
   ShieldCheck,
   SlidersHorizontal,
+  Star,
   TrendingUp,
+  Trash2,
   Wrench
 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -26,6 +29,8 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   fetchActiveEtfChanges,
   fetchActiveEtfSnapshots,
+  addWatchlistItem,
+  createWatchlistGroup,
   fetchBacktestJob,
   fetchBacktestConfig,
   fetchBrokerBranches,
@@ -42,6 +47,8 @@ import {
   fetchRevenueMomentum,
   fetchStrongStocks,
   fetchStockOverview,
+  fetchWatchlists,
+  removeWatchlistItem,
   fetchUsMarketCalendar,
   startNewsJob,
   startBacktestJob,
@@ -72,11 +79,12 @@ import type {
   RevenueMomentum,
   StockOverview,
   StrongStocks,
-  UsMarketCalendar
+  UsMarketCalendar,
+  WatchlistsOverview
 } from "./types";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
-type ViewKey = "overview" | "stock" | "strong" | "data" | "market" | "broker" | "revenue" | "usCalendar" | "etf" | "backtest" | "news" | "research" | "system";
+type ViewKey = "overview" | "stock" | "favorites" | "strong" | "data" | "market" | "broker" | "revenue" | "usCalendar" | "etf" | "backtest" | "news" | "research" | "system";
 type StockNavigation = {
   sourceLabel: string;
   codes: string[];
@@ -183,6 +191,7 @@ const defaultBacktestParams: BacktestTuningParams = {
 const navItems: { key: ViewKey; label: string; icon: ReactNode }[] = [
   { key: "overview", label: "總覽", icon: <Activity size={20} /> },
   { key: "stock", label: "個股", icon: <Search size={20} /> },
+  { key: "favorites", label: "最愛", icon: <Star size={20} /> },
   { key: "strong", label: "強勢", icon: <TrendingUp size={20} /> },
   { key: "data", label: "資料", icon: <Database size={20} /> },
   { key: "market", label: "產業", icon: <Layers3 size={20} /> },
@@ -215,6 +224,9 @@ export function App() {
   const [stockLoading, setStockLoading] = useState(false);
   const [stockUpdating, setStockUpdating] = useState(false);
   const [stockNavigation, setStockNavigation] = useState<StockNavigation | null>(null);
+  const [watchlists, setWatchlists] = useState<WatchlistsOverview | null>(null);
+  const [favoriteGroupId, setFavoriteGroupId] = useState<number | null>(null);
+  const [favoriteAdding, setFavoriteAdding] = useState(false);
   const [strongStocks, setStrongStocks] = useState<StrongStocks | null>(null);
   const [strongDays, setStrongDays] = useState(7);
   const [strongLimit, setStrongLimit] = useState(10);
@@ -308,6 +320,54 @@ export function App() {
       setStockError(error instanceof Error ? error.message : "股票資料讀取失敗");
     } finally {
       setStockLoading(false);
+    }
+  }
+
+  async function loadWatchlists(groupId = favoriteGroupId) {
+    try {
+      const nextWatchlists = await fetchWatchlists(groupId);
+      setWatchlists(nextWatchlists);
+      setFavoriteGroupId(nextWatchlists.selected_group_id ?? nextWatchlists.groups[0]?.id ?? null);
+    } catch (error) {
+      setFeatureError(error instanceof Error ? error.message : "最愛清單讀取失敗");
+    }
+  }
+
+  async function handleCreateWatchlistGroup(name: string) {
+    setFeatureError("");
+    try {
+      const nextWatchlists = await createWatchlistGroup(name);
+      setWatchlists(nextWatchlists);
+      setFavoriteGroupId(nextWatchlists.selected_group_id ?? nextWatchlists.groups[0]?.id ?? null);
+    } catch (error) {
+      setFeatureError(error instanceof Error ? error.message : "建立最愛群組失敗");
+    }
+  }
+
+  async function handleAddFavorite(stockCode: string) {
+    const normalized = stockCode.trim();
+    if (!normalized) return;
+    setFavoriteAdding(true);
+    setFeatureError("");
+    try {
+      const nextWatchlists = await addWatchlistItem(normalized, favoriteGroupId);
+      setWatchlists(nextWatchlists);
+      setFavoriteGroupId(nextWatchlists.selected_group_id ?? favoriteGroupId);
+    } catch (error) {
+      setFeatureError(error instanceof Error ? error.message : "加入最愛失敗");
+    } finally {
+      setFavoriteAdding(false);
+    }
+  }
+
+  async function handleRemoveFavorite(groupId: number, stockCode: string) {
+    setFeatureError("");
+    try {
+      const nextWatchlists = await removeWatchlistItem(groupId, stockCode);
+      setWatchlists(nextWatchlists);
+      setFavoriteGroupId(nextWatchlists.selected_group_id ?? groupId);
+    } catch (error) {
+      setFeatureError(error instanceof Error ? error.message : "移除最愛失敗");
     }
   }
 
@@ -542,6 +602,7 @@ export function App() {
     void startBootstrapDataJobs();
     void loadOverview();
     void loadStock("2330");
+    void loadWatchlists();
     void loadStrongStocks(7);
     void loadPriceCacheOverview();
     void loadLatestPriceJob();
@@ -673,10 +734,32 @@ export function App() {
             stockQuotes={stockQuotes}
             stockError={stockError}
             navigation={stockNavigationState}
+            watchlists={watchlists}
+            favoriteGroupId={favoriteGroupId}
+            favoriteAdding={favoriteAdding}
             onStockInputChange={setStockInput}
             onStockSubmit={handleStockSubmit}
             onPriceUpdate={handleStockPriceUpdate}
+            onFavoriteGroupChange={setFavoriteGroupId}
+            onAddFavorite={handleAddFavorite}
             onNavigateStock={(code) => openStockDetail(code)}
+          />
+        ) : null}
+
+        {activeView === "favorites" ? (
+          <WatchlistView
+            watchlists={watchlists}
+            selectedGroupId={favoriteGroupId}
+            onGroupSelect={(groupId) => {
+              setFavoriteGroupId(groupId);
+              void loadWatchlists(groupId);
+            }}
+            onCreateGroup={handleCreateWatchlistGroup}
+            onRemoveItem={handleRemoveFavorite}
+            onStockSelect={(code) => openStockDetail(code, {
+              sourceLabel: "最愛清單",
+              codes: uniqueCodes(watchlists?.items.map((item) => item.stock_code) ?? [])
+            })}
           />
         ) : null}
 
@@ -887,6 +970,134 @@ function OverviewView({
   );
 }
 
+function FavoriteControl({
+  stockCode,
+  watchlists,
+  selectedGroupId,
+  adding,
+  onGroupChange,
+  onAddFavorite
+}: {
+  stockCode: string;
+  watchlists: WatchlistsOverview | null;
+  selectedGroupId: number | null;
+  adding: boolean;
+  onGroupChange: (groupId: number | null) => void;
+  onAddFavorite: (code: string) => Promise<void>;
+}) {
+  const groups = watchlists?.groups ?? [];
+  const effectiveGroupId = selectedGroupId ?? groups[0]?.id ?? null;
+  return (
+    <div className="favorite-control">
+      <Star size={16} />
+      <select
+        value={effectiveGroupId ?? ""}
+        onChange={(event) => onGroupChange(event.target.value ? Number(event.target.value) : null)}
+        aria-label="選擇最愛群組"
+      >
+        {groups.map((group) => (
+          <option value={group.id} key={group.id}>{group.name}</option>
+        ))}
+      </select>
+      <button type="button" onClick={() => void onAddFavorite(stockCode)} disabled={adding || !stockCode}>
+        {adding ? "加入中" : "加入最愛"}
+      </button>
+    </div>
+  );
+}
+
+function WatchlistView({
+  watchlists,
+  selectedGroupId,
+  onGroupSelect,
+  onCreateGroup,
+  onRemoveItem,
+  onStockSelect
+}: {
+  watchlists: WatchlistsOverview | null;
+  selectedGroupId: number | null;
+  onGroupSelect: (groupId: number) => void;
+  onCreateGroup: (name: string) => Promise<void>;
+  onRemoveItem: (groupId: number, stockCode: string) => Promise<void>;
+  onStockSelect: (code: string) => void;
+}) {
+  const [newGroupName, setNewGroupName] = useState("");
+  const groups = watchlists?.groups ?? [];
+  const items = watchlists?.items ?? [];
+  const effectiveGroupId = selectedGroupId ?? watchlists?.selected_group_id ?? groups[0]?.id ?? null;
+  const selectedGroup = groups.find((group) => group.id === effectiveGroupId) ?? groups[0] ?? null;
+
+  function handleCreate(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const normalized = newGroupName.trim();
+    if (!normalized) return;
+    setNewGroupName("");
+    void onCreateGroup(normalized);
+  }
+
+  return (
+    <section className="watchlist-layout">
+      <article className="data-panel watchlist-sidebar">
+        <div className="section-title">
+          <Star size={20} />
+          <h2>最愛群組</h2>
+        </div>
+        <form className="watchlist-create" onSubmit={handleCreate}>
+          <input value={newGroupName} onChange={(event) => setNewGroupName(event.target.value)} placeholder="新增群組，例如 AI / 觀察突破" />
+          <button type="submit" aria-label="新增群組"><Plus size={16} /></button>
+        </form>
+        <div className="watchlist-group-list">
+          {groups.map((group) => (
+            <button
+              type="button"
+              className={group.id === effectiveGroupId ? "active" : ""}
+              key={group.id}
+              onClick={() => onGroupSelect(group.id)}
+            >
+              <strong>{group.name}</strong>
+              <span>{group.item_count} 檔</span>
+            </button>
+          ))}
+        </div>
+      </article>
+
+      <article className="data-panel watchlist-items">
+        <div className="section-title with-controls">
+          <div className="title-inline">
+            <BadgeCheck size={20} />
+            <h2>{selectedGroup?.name ?? "最愛清單"}</h2>
+          </div>
+          <span className="muted">{items.length} 檔股票</span>
+        </div>
+        {items.length ? (
+          <div className="dense-table watchlist-table">
+            {items.map((item) => (
+              <div className="dense-row watchlist-row" key={`${item.group_id}-${item.stock_code}`}>
+                <button type="button" className="watchlist-stock-button" onClick={() => onStockSelect(item.stock_code)}>
+                  <strong>{item.stock_name || item.stock_code}</strong>
+                  <span>{item.stock_code}</span>
+                </button>
+                <em>{item.added_at.slice(0, 10)}</em>
+                <button
+                  type="button"
+                  className="icon-danger-button"
+                  title="移除"
+                  aria-label={`移除 ${item.stock_code}`}
+                  onClick={() => void onRemoveItem(item.group_id, item.stock_code)}
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="muted">這個群組還沒有股票。到個股詳頁按「加入最愛」就會放進來。</p>
+        )}
+      </article>
+    </section>
+  );
+}
+
 function StockView({
   stockInput,
   stockLoading,
@@ -895,9 +1106,14 @@ function StockView({
   stockQuotes,
   stockError,
   navigation,
+  watchlists,
+  favoriteGroupId,
+  favoriteAdding,
   onStockInputChange,
   onStockSubmit,
   onPriceUpdate,
+  onFavoriteGroupChange,
+  onAddFavorite,
   onNavigateStock
 }: {
   stockInput: string;
@@ -907,11 +1123,17 @@ function StockView({
   stockQuotes: StockOverview["quotes"];
   stockError: string;
   navigation: StockNavigationState | null;
+  watchlists: WatchlistsOverview | null;
+  favoriteGroupId: number | null;
+  favoriteAdding: boolean;
   onStockInputChange: (value: string) => void;
   onStockSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onPriceUpdate: () => Promise<void>;
+  onFavoriteGroupChange: (groupId: number | null) => void;
+  onAddFavorite: (code: string) => Promise<void>;
   onNavigateStock: (code: string) => void;
 }) {
+  const stockCode = stockOverview?.security?.code || stockInput;
   return (
     <>
       <section className="stock-top-grid">
@@ -949,6 +1171,16 @@ function StockView({
             </div>
           ) : null}
           {stockError ? <p className="inline-error">{stockError}</p> : null}
+          {stockOverview?.found ? (
+            <FavoriteControl
+              stockCode={stockCode}
+              watchlists={watchlists}
+              selectedGroupId={favoriteGroupId}
+              adding={favoriteAdding}
+              onGroupChange={onFavoriteGroupChange}
+              onAddFavorite={onAddFavorite}
+            />
+          ) : null}
           <StockIdentity stockOverview={stockOverview} />
         </article>
       </section>
@@ -2342,6 +2574,7 @@ function viewTitle(view: ViewKey) {
   return {
     overview: "台股資料中樞",
     stock: "個股詳頁",
+    favorites: "最愛清單",
     strong: "強勢個股",
     data: "本機資料更新",
     market: "產業地圖",

@@ -15,6 +15,7 @@ CACHE_DB_FILES = [
     "chip_cache.db",
     "ui_persistent_cache.db",
     "api_jobs.db",
+    "watchlists.db",
 ]
 
 DATA_CONFIG_FILES = [

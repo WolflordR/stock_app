@@ -22,7 +22,8 @@ import type {
   StockOverview,
   StockStatus,
   StrongStocks,
-  UsMarketCalendar
+  UsMarketCalendar,
+  WatchlistsOverview
 } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
@@ -40,6 +41,16 @@ async function postJson<T>(path: string, payload: unknown): Promise<T> {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    throw new Error(`Request failed: ${response.status}`);
+  }
+  return response.json() as Promise<T>;
+}
+
+async function deleteJson<T>(path: string): Promise<T> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: "DELETE"
   });
   if (!response.ok) {
     throw new Error(`Request failed: ${response.status}`);
@@ -73,6 +84,26 @@ export function fetchStockDetail(stockId: string): Promise<StockDetail> {
 
 export function fetchStockOverview(stockId: string): Promise<StockOverview> {
   return requestJson<StockOverview>(`/api/stocks/${encodeURIComponent(stockId)}/overview`);
+}
+
+export function fetchWatchlists(groupId?: number | null): Promise<WatchlistsOverview> {
+  const query = groupId ? `?group_id=${groupId}` : "";
+  return requestJson<WatchlistsOverview>(`/api/watchlists${query}`);
+}
+
+export function createWatchlistGroup(name: string): Promise<WatchlistsOverview> {
+  return postJson<WatchlistsOverview>("/api/watchlists/groups", { name });
+}
+
+export function addWatchlistItem(stockCode: string, groupId?: number | null): Promise<WatchlistsOverview> {
+  return postJson<WatchlistsOverview>("/api/watchlists/items", {
+    stock_code: stockCode,
+    group_id: groupId ?? undefined
+  });
+}
+
+export function removeWatchlistItem(groupId: number, stockCode: string): Promise<WatchlistsOverview> {
+  return deleteJson<WatchlistsOverview>(`/api/watchlists/groups/${groupId}/items/${encodeURIComponent(stockCode)}`);
 }
 
 export function updateStockPriceCache(stockId: string, days = 1825): Promise<PriceCacheUpdateResponse> {
