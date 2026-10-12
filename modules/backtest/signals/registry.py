@@ -13,6 +13,7 @@ from modules.backtest.signals.basic import (
     strategy_volume_surge,
 )
 from modules.backtest.signals.gap import strategy_gap_support_rebound
+from modules.backtest.signals.initial_rise import analyze_initial_rise_candidate
 from modules.backtest.signals.momentum_volume import analyze_momentum_volume_candidate
 from modules.backtest.signals.pullback import (
     analyze_high_price_pullback_candidate,
@@ -278,6 +279,53 @@ def _evaluate_momentum_volume(df, _benchmark_df, params):
     }
 
 
+def _evaluate_initial_rise(df, _benchmark_df, params):
+    setup = analyze_initial_rise_candidate(
+        df,
+        max_5d_gain_pct=_param(params, "initial_rise_max_5d_gain_pct", 8.0),
+        max_10d_gain_pct=_param(params, "initial_rise_max_10d_gain_pct", 15.0),
+        min_today_gain_pct=_param(params, "initial_rise_min_today_gain_pct", 2.0),
+        max_today_gain_pct=_param(params, "initial_rise_max_today_gain_pct", 7.0),
+        volume_ma_period=_param(params, "initial_rise_volume_ma_period", 20),
+        min_volume_ratio=_param(params, "initial_rise_min_volume_ratio", 1.3),
+        quiet_volume_days=_param(params, "initial_rise_quiet_volume_days", 3),
+        consolidation_days=_param(params, "initial_rise_consolidation_days", 20),
+        max_range_width_pct=_param(params, "initial_rise_max_range_width_pct", 15.0),
+        breakout_days=_param(params, "initial_rise_breakout_days", 10),
+        min_close_position=_param(params, "initial_rise_min_close_position", 0.7),
+        stock_id=_param(params, "stock_id"),
+    )
+    if not setup:
+        return False, {}
+    return bool(setup.get("matched", False)), {
+        "initial_rise_score": setup.get("score"),
+        "initial_rise_latest_close": setup.get("latest_close"),
+        "initial_rise_today_return_pct": setup.get("today_return_pct"),
+        "initial_rise_pre_5d_gain_pct": setup.get("pre_5d_gain_pct"),
+        "initial_rise_pre_10d_gain_pct": setup.get("pre_10d_gain_pct"),
+        "initial_rise_latest_volume": setup.get("latest_volume"),
+        "initial_rise_avg_volume_20d": setup.get("avg_volume_20d"),
+        "initial_rise_volume_ratio_today": setup.get("volume_ratio_today"),
+        "initial_rise_max_previous_volume_ratio": setup.get("max_previous_volume_ratio"),
+        "initial_rise_quiet_volume_days": setup.get("quiet_volume_days"),
+        "initial_rise_consolidation_days": setup.get("consolidation_days"),
+        "initial_rise_range_width_pct": setup.get("range_width_pct"),
+        "initial_rise_breakout_days": setup.get("breakout_days"),
+        "initial_rise_breakout_close": setup.get("breakout_close"),
+        "initial_rise_breakout_confirmed": setup.get("breakout_confirmed"),
+        "initial_rise_close_position": setup.get("close_position"),
+        "initial_rise_bullish_candle": setup.get("bullish_candle"),
+        "initial_rise_pre_gain_ok": setup.get("pre_gain_ok"),
+        "initial_rise_today_gain_ok": setup.get("today_gain_ok"),
+        "initial_rise_volume_expanded": setup.get("volume_expanded"),
+        "initial_rise_quiet_before": setup.get("quiet_before"),
+        "initial_rise_consolidation_ok": setup.get("consolidation_ok"),
+        "initial_rise_candle_ok": setup.get("candle_ok"),
+        "initial_rise_positive_reasons": setup.get("positive_reasons") or [],
+        "initial_rise_caution_reasons": setup.get("caution_reasons") or [],
+    }
+
+
 def _evaluate_relative_strength(df, benchmark_df, params):
     matched, rs_spread_pct = strategy_relative_strength_filter(
         df,
@@ -317,6 +365,7 @@ BUY_STRATEGY_REGISTRY = {
     "接近前高／即將突破": _evaluate_near_breakout,
     "碗形底＋帶量向上": _evaluate_bowl_bottom_volume,
     "動能向上＋量價配合": _evaluate_momentum_volume,
+    "起漲第一天 / 初始量價轉強": _evaluate_initial_rise,
     "相對強弱濾網": _evaluate_relative_strength,
     "W底反彈": _evaluate_w_bottom,
 }
@@ -363,6 +412,8 @@ def get_buy_strategy_history_buffer_days(selected_strategies, selected_sell_stra
     if "碗形底＋帶量向上" in selected_strategies:
         history_buffer_days = max(history_buffer_days, 220)
     if "動能向上＋量價配合" in selected_strategies:
+        history_buffer_days = max(history_buffer_days, 90)
+    if "起漲第一天 / 初始量價轉強" in selected_strategies:
         history_buffer_days = max(history_buffer_days, 90)
     if "相對強弱濾網" in selected_strategies:
         history_buffer_days = max(history_buffer_days, rs_lookback_days + 90)

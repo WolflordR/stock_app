@@ -21,6 +21,7 @@ python -m apps.worker.update_price_cache --stock 2330 --days 180
 python -m apps.worker.update_price_cache --stock 2330 --days 180 --force
 python -m apps.worker.import_broker_csv_folder --date 2026-09-04
 python -m apps.worker.daily_update --dry-run
+python -m scripts.backfill_chip_trends --days 370
 ```
 
 NAS 排程可以先從保守模式開始：

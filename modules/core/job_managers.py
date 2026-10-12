@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import inspect
+import os
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from datetime import datetime
-from threading import Lock
+from threading import Event, Lock
 from uuid import uuid4
 
 from modules.backtest.backtest_service import run_backtest_scan
@@ -12,13 +13,16 @@ from modules.backtest.backtest_service import run_backtest_scan
 
 class BacktestJobManager:
     def __init__(self, job_store=None):
-        self.executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="trade-backtest")
+        self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="trade-backtest")
         self.lock = Lock()
         self.jobs = {}
+        self.cancel_events = {}
         self.job_store = job_store
 
     def start_job(self, request):
+        self.cancel_active_jobs()
         job_id = uuid4().hex[:8]
+        cancel_event = Event()
         job = {
             "job_id": job_id,
             "job_type": "backtest",
@@ -33,9 +37,33 @@ class BacktestJobManager:
         }
         with self.lock:
             self.jobs[job_id] = job
+            self.cancel_events[job_id] = cancel_event
         self._persist_job(job)
         self.executor.submit(self._run_job, job_id, request)
         return job_id
+
+    def cancel_active_jobs(self):
+        now = datetime.now().isoformat(timespec="seconds")
+        cancelled_jobs = []
+        with self.lock:
+            for job_id, job in self.jobs.items():
+                if job.get("status") not in {"queued", "running"}:
+                    continue
+                event = self.cancel_events.get(job_id)
+                if event:
+                    event.set()
+                job.update(
+                    status="cancelled",
+                    progress=1.0,
+                    message="已取消舊的選股任務",
+                    error=None,
+                    finished_at=now,
+                )
+                cancelled_jobs.append(dict(job))
+        if self.job_store:
+            self.job_store.cancel_active_jobs("backtest", message="已取消舊的選股任務")
+        for job in cancelled_jobs:
+            self._persist_job(job)
 
     def _update_job(self, job_id, **updates):
         job = None
@@ -60,12 +88,27 @@ class BacktestJobManager:
         def status_callback(message):
             self._update_job(job_id, message=message)
 
+        def should_stop():
+            event = self.cancel_events.get(job_id)
+            return bool(event and event.is_set())
+
         try:
             results = run_backtest_scan(
                 request,
                 progress_callback=progress_callback,
                 status_callback=status_callback,
+                should_stop=should_stop,
             )
+            if should_stop():
+                self._update_job(
+                    job_id,
+                    status="cancelled",
+                    progress=1.0,
+                    message="已取消舊的選股任務",
+                    result={},
+                    finished_at=datetime.now().isoformat(timespec="seconds"),
+                )
+                return
             self._update_job(
                 job_id,
                 status="completed",
@@ -98,7 +141,8 @@ class BacktestJobManager:
 
 class BackgroundDataJobManager:
     def __init__(self, job_store=None):
-        self.executor = ThreadPoolExecutor(max_workers=6, thread_name_prefix="trade-data")
+        workers = max(1, min(6, int(os.getenv("TRADE_API_DATA_JOB_WORKERS", "6"))))
+        self.executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="trade-data")
         self.lock = Lock()
         self.jobs = {}
         self.jobs_by_key = {}

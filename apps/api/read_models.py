@@ -9,132 +9,15 @@ from modules.core.project_paths import db_path
 from modules.data_sources.official_broker_import import get_latest_official_broker_summary, list_official_broker_branches
 from modules.data_sources.price_cache import get_price_cache_status
 from modules.data_sources.stock_db import find_security
+from modules.data_sources.valuation_data import get_stock_valuation
+from modules.data_sources.financial_eps import get_latest_eps
 from modules.industry.classification_queries import get_company_official_industry_df
+from modules.industry.classification_v4 import get_stock_classification
+from modules.data_sources.us_economic_calendar import load_official_us_calendar
 from modules.backtest.strategy_config import BUY_STRATEGY_METADATA, DEFAULT_BUY_STRATEGIES, DEFAULT_SELL_STRATEGIES, SELL_STRATEGY_METADATA
 
 
 STOCK_CHART_HISTORY_LIMIT = 1260
-
-US_MARKET_CALENDAR_EVENTS = [
-    {
-        "date": "2026-09-08",
-        "time": "22:00",
-        "country": "US",
-        "event": "NFIB 小型企業信心指數",
-        "category": "信心指數",
-        "importance": "medium",
-        "previous": "100.3",
-        "forecast": "100.6",
-        "actual": None,
-        "unit": "index",
-        "market_impact": "中小企業信心影響景氣預期與 Russell 2000 情緒。",
-    },
-    {
-        "date": "2026-09-09",
-        "time": "22:00",
-        "country": "US",
-        "event": "批發庫存月增率",
-        "category": "庫存",
-        "importance": "low",
-        "previous": "0.2%",
-        "forecast": "0.1%",
-        "actual": None,
-        "unit": "%",
-        "market_impact": "通常影響較溫和，可用來觀察需求與庫存循環。",
-    },
-    {
-        "date": "2026-09-10",
-        "time": "20:30",
-        "country": "US",
-        "event": "CPI 年增率",
-        "category": "通膨",
-        "importance": "high",
-        "previous": "2.7%",
-        "forecast": "2.8%",
-        "actual": None,
-        "unit": "%",
-        "market_impact": "高於預期通常推升殖利率，壓抑科技與成長股估值。",
-    },
-    {
-        "date": "2026-09-10",
-        "time": "20:30",
-        "country": "US",
-        "event": "核心 CPI 月增率",
-        "category": "通膨",
-        "importance": "high",
-        "previous": "0.2%",
-        "forecast": "0.3%",
-        "actual": None,
-        "unit": "%",
-        "market_impact": "聯準會關注核心通膨，會直接牽動降息預期。",
-    },
-    {
-        "date": "2026-09-10",
-        "time": "20:30",
-        "country": "US",
-        "event": "初領失業救濟金人數",
-        "category": "就業",
-        "importance": "medium",
-        "previous": "23.1萬",
-        "forecast": "23.5萬",
-        "actual": None,
-        "unit": "人",
-        "market_impact": "高於預期代表就業轉弱，可能增加降息押注。",
-    },
-    {
-        "date": "2026-09-11",
-        "time": "20:30",
-        "country": "US",
-        "event": "PPI 月增率",
-        "category": "通膨",
-        "importance": "high",
-        "previous": "0.4%",
-        "forecast": "0.2%",
-        "actual": None,
-        "unit": "%",
-        "market_impact": "生產端價格若升溫，可能延長市場對通膨黏性的擔憂。",
-    },
-    {
-        "date": "2026-09-11",
-        "time": "22:00",
-        "country": "US",
-        "event": "密大消費者信心初值",
-        "category": "信心指數",
-        "importance": "medium",
-        "previous": "58.2",
-        "forecast": "59.0",
-        "actual": None,
-        "unit": "index",
-        "market_impact": "消費信心會影響零售、非必需消費與景氣循環股。",
-    },
-    {
-        "date": "2026-09-15",
-        "time": "20:30",
-        "country": "US",
-        "event": "零售銷售月增率",
-        "category": "消費",
-        "importance": "high",
-        "previous": "0.5%",
-        "forecast": "0.2%",
-        "actual": None,
-        "unit": "%",
-        "market_impact": "強勁零售代表需求韌性，可能支撐循環股但壓低降息預期。",
-    },
-    {
-        "date": "2026-09-16",
-        "time": "02:00",
-        "country": "US",
-        "event": "FOMC 利率決議",
-        "category": "央行",
-        "importance": "high",
-        "previous": "4.25%-4.50%",
-        "forecast": "4.00%-4.25%",
-        "actual": None,
-        "unit": "%",
-        "market_impact": "利率路徑與點陣圖是科技股、美元、債券最關鍵變數。",
-    },
-]
-
 
 def _connect_db(filename: str) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path(filename))
@@ -167,19 +50,17 @@ def list_us_market_calendar(
     end = date.fromisoformat(end_date) if end_date else today + timedelta(days=21)
     normalized_importance = str(importance or "all").strip().lower()
 
-    rows = []
-    for event in US_MARKET_CALENDAR_EVENTS:
-        event_date = date.fromisoformat(event["date"])
-        if event_date < start or event_date > end:
-            continue
-        if normalized_importance != "all" and event["importance"] != normalized_importance:
-            continue
-        rows.append(event)
-
-    rows.sort(key=lambda row: (row["date"], row["time"], row["event"]))
+    official = load_official_us_calendar(start, end)
+    rows = [event for event in official["rows"]
+            if start.isoformat() <= event["date"] <= end.isoformat()
+            and (normalized_importance == "all" or event["importance"] == normalized_importance)]
     return {
-        "source": "mock",
-        "source_label": "本機模擬資料，欄位參考 MoneyDJ 美股數據公布行事曆",
+        "source": official["source"],
+        "source_label": official["source_label"],
+        "source_url": "https://www.newyorkfed.org/research/calendars/nationalecon_cal",
+        "last_updated_at": official["last_updated_at"],
+        "errors": official["errors"],
+        "time_zone": "Asia/Taipei",
         "start_date": start.isoformat(),
         "end_date": end.isoformat(),
         "importance": normalized_importance,
@@ -294,7 +175,7 @@ def list_stock_price_history(symbol: str, limit: int = 30) -> list[dict[str, Any
             """
             SELECT trade_date, open, high, low, close, volume
             FROM price_history
-            WHERE symbol = ?
+            WHERE symbol = ? AND volume > 0
             ORDER BY trade_date DESC
             LIMIT ?
             """,
@@ -313,6 +194,7 @@ def get_price_cache_overview() -> dict[str, Any]:
                 MIN(trade_date) AS first_trade_date,
                 MAX(trade_date) AS last_trade_date
             FROM price_history
+            WHERE volume > 0
             """
         ).fetchone()
         meta = conn.execute(
@@ -475,21 +357,21 @@ def build_data_sources_overview() -> dict[str, Any]:
             "row_count": etf.get("snapshot_count", 0),
             "symbol_count": etf.get("symbol_count", 0),
             "update_mode": "worker",
-            "action_label": "待接更新",
+            "action_label": "於 ETF 頁更新",
             "action_enabled": False,
-            "note": "目前讀本地快照；更新任務之後拆到 worker。",
+            "note": "每日 worker 與 ETF 頁更新按鈕會取得最新快照。",
         },
         {
             "key": "us_calendar",
             "title": "美股數據行事曆",
-            "description": "美國重要經濟數據公布時間、前值、預期與影響。",
-            "status": "mock",
+            "description": "美國經濟數據官方公布排程，時間換算為台灣時間。",
+            "status": "ready" if calendar.get("event_count") else "error" if calendar.get("source") == "unavailable" else "empty",
             "db_file": None,
-            "latest_date": calendar.get("end_date"),
+            "latest_date": calendar.get("last_updated_at"),
             "row_count": calendar.get("event_count", 0),
             "symbol_count": None,
-            "update_mode": "mock",
-            "action_label": "待接資料源",
+            "update_mode": "official_calendar",
+            "action_label": "官方行事曆",
             "action_enabled": False,
             "note": calendar.get("source_label"),
         },
@@ -502,8 +384,7 @@ def list_strong_stocks(days: int = 7, limit: int = 10) -> dict[str, Any]:
     normalized_limit = max(1, min(int(limit), 50))
     with _connect_db("price_cache.db") as conn:
         conn.execute("ATTACH DATABASE ? AS stockdb", (str(db_path("stocks.db")),))
-        latest = conn.execute("SELECT MAX(trade_date) AS trade_date FROM price_history").fetchone()
-        anchor_date = latest["trade_date"] if latest else None
+        anchor_date = _latest_taiwan_trade_date(conn)
         if not anchor_date:
             return {"summary": {"days": normalized_days, "limit": normalized_limit, "anchor_date": None}, "rows": []}
 
@@ -517,7 +398,8 @@ def list_strong_stocks(days: int = 7, limit: int = 10) -> dict[str, Any]:
                 SELECT symbol, trade_date, close
                 FROM price_history
                 WHERE trade_date BETWEEN ? AND ?
-                  AND close IS NOT NULL
+                  AND close IS NOT NULL AND volume > 0
+                  AND (symbol LIKE '%.TW' OR symbol LIKE '%.TWO')
             ),
             bounds AS (
                 SELECT
@@ -527,7 +409,7 @@ def list_strong_stocks(days: int = 7, limit: int = 10) -> dict[str, Any]:
                     COUNT(*) AS quote_count
                 FROM windowed
                 GROUP BY symbol
-                HAVING COUNT(*) >= 2
+                HAVING COUNT(*) >= 2 AND MAX(trade_date) = ?
             )
             SELECT COUNT(*) AS candidate_count
             FROM bounds b
@@ -541,7 +423,7 @@ def list_strong_stocks(days: int = 7, limit: int = 10) -> dict[str, Any]:
               AND p0.close != 0
               AND p1.close IS NOT NULL
             """,
-            (start_date, anchor_date),
+            (start_date, anchor_date, anchor_date),
         ).fetchone()
         candidate_count = int(candidate_summary["candidate_count"] or 0)
         rank_rows = conn.execute(
@@ -550,7 +432,8 @@ def list_strong_stocks(days: int = 7, limit: int = 10) -> dict[str, Any]:
                 SELECT symbol, trade_date, close
                 FROM price_history
                 WHERE trade_date BETWEEN ? AND ?
-                  AND close IS NOT NULL
+                  AND close IS NOT NULL AND volume > 0
+                  AND (symbol LIKE '%.TW' OR symbol LIKE '%.TWO')
             ),
             bounds AS (
                 SELECT
@@ -560,7 +443,7 @@ def list_strong_stocks(days: int = 7, limit: int = 10) -> dict[str, Any]:
                     COUNT(*) AS quote_count
                 FROM windowed
                 GROUP BY symbol
-                HAVING COUNT(*) >= 2
+                HAVING COUNT(*) >= 2 AND MAX(trade_date) = ?
             )
             SELECT
                 b.symbol,
@@ -589,7 +472,7 @@ def list_strong_stocks(days: int = 7, limit: int = 10) -> dict[str, Any]:
             ORDER BY change_pct DESC, quote_count DESC, b.symbol
             LIMIT ?
             """,
-            (start_date, anchor_date, normalized_limit),
+            (start_date, anchor_date, anchor_date, normalized_limit),
         ).fetchall()
 
         symbols = [row["symbol"] for row in rank_rows]
@@ -602,7 +485,7 @@ def list_strong_stocks(days: int = 7, limit: int = 10) -> dict[str, Any]:
                 FROM price_history
                 WHERE symbol IN ({placeholders})
                   AND trade_date BETWEEN ? AND ?
-                  AND close IS NOT NULL
+                  AND close IS NOT NULL AND volume > 0
                 ORDER BY symbol, trade_date
                 """,
                 (*symbols, start_date, anchor_date),
@@ -1029,7 +912,13 @@ def list_research_companies(search_text: str | None = None, limit: int = 80) -> 
     return _json_safe({"summary": dict(summary), "rows": payload_rows})
 
 
-def build_quote_summary(quotes: list[dict[str, Any]]) -> dict[str, Any] | None:
+def _latest_taiwan_trade_date(conn: sqlite3.Connection) -> str | None:
+    row = conn.execute("""SELECT MAX(trade_date) AS trade_date FROM price_history
+                          WHERE volume > 0 AND (symbol LIKE '%.TW' OR symbol LIKE '%.TWO')""").fetchone()
+    return row["trade_date"] if row else None
+
+
+def build_quote_summary(quotes: list[dict[str, Any]], market_trade_date: str | None = None) -> dict[str, Any] | None:
     if not quotes:
         return None
 
@@ -1039,7 +928,8 @@ def build_quote_summary(quotes: list[dict[str, Any]]) -> dict[str, Any] | None:
     previous_close = previous.get("close") if previous else None
     change = None
     change_pct = None
-    if close is not None and previous_close not in (None, 0):
+    is_current = latest.get("trade_date") == market_trade_date if market_trade_date else None
+    if is_current is True and close is not None and previous_close not in (None, 0):
         change = float(close) - float(previous_close)
         change_pct = change / float(previous_close) * 100
 
@@ -1052,6 +942,7 @@ def build_quote_summary(quotes: list[dict[str, Any]]) -> dict[str, Any] | None:
         "volume": latest.get("volume"),
         "change": change,
         "change_pct": change_pct,
+        "is_current": is_current,
     }
 
 
@@ -1123,8 +1014,11 @@ def build_stock_overview(stock_id: str) -> dict[str, Any]:
             "stock_id": stock_id,
             "found": False,
             "security": None,
+            "classification": None,
             "price_cache": None,
             "latest_quote": None,
+            "valuation": None,
+            "eps": None,
             "quotes": [],
             "broker_summary": None,
             "institutional_trading": [],
@@ -1142,6 +1036,8 @@ def build_stock_overview(stock_id: str) -> dict[str, Any]:
     }
     price_cache = get_price_cache_status(symbol)
     quotes = list_stock_price_history(symbol, limit=STOCK_CHART_HISTORY_LIMIT)
+    with _connect_db("price_cache.db") as conn:
+        market_trade_date = _latest_taiwan_trade_date(conn)
     broker_summary = get_latest_official_broker_summary(stock_code, market=market)
 
     broker_payload = None
@@ -1160,8 +1056,12 @@ def build_stock_overview(stock_id: str) -> dict[str, Any]:
             "stock_id": stock_id,
             "found": True,
             "security": security,
+            "classification": get_stock_classification(str(stock_code).zfill(4)),
             "price_cache": price_cache,
-            "latest_quote": build_quote_summary(quotes),
+            "market_trade_date": market_trade_date,
+            "latest_quote": build_quote_summary(quotes, market_trade_date),
+            "valuation": get_stock_valuation(stock_code, market),
+            "eps": get_latest_eps(stock_code, market),
             "quotes": quotes,
             "broker_summary": broker_payload,
             "institutional_trading": list_stock_institutional_history(stock_code, market=market, limit=20),

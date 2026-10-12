@@ -16,6 +16,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { PriceQuote } from "../types";
+import type { MarginRow } from "../api";
 
 type ChartRow = {
   time: string;
@@ -44,31 +45,28 @@ const intervalLabels: Record<ChartInterval, string> = {
   monthly: "月K"
 };
 
-const sampleHistory: ChartRow[] = [
-  { time: "2026-08-24", open: 2410, high: 2410, low: 2375, close: 2375, volume: 10658045 },
-  { time: "2026-08-25", open: 2355, high: 2400, low: 2350, close: 2400, volume: 12843032 },
-  { time: "2026-08-26", open: 2375, high: 2425, low: 2375, close: 2415, volume: 17662672 },
-  { time: "2026-08-27", open: 2430, high: 2435, low: 2410, close: 2410, volume: 16247745 },
-  { time: "2026-08-28", open: 2440, high: 2445, low: 2410, close: 2420, volume: 13601211 },
-  { time: "2026-08-31", open: 2395, high: 2405, low: 2375, close: 2405, volume: 27171787 },
-  { time: "2026-09-01", open: 2395, high: 2440, low: 2390, close: 2440, volume: 17216484 },
-  { time: "2026-09-02", open: 2415, high: 2420, low: 2385, close: 2385, volume: 19825721 },
-  { time: "2026-09-03", open: 2385, high: 2400, low: 2380, close: 2390, volume: 12602565 }
-];
-
-export function CandlestickVolumeChart({ quotes }: { quotes: PriceQuote[] }) {
+export function CandlestickVolumeChart({ quotes, margin = [], latestQuoteIsCurrent = true }: { quotes: PriceQuote[]; margin?: MarginRow[]; latestQuoteIsCurrent?: boolean }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const [hovered, setHovered] = useState<OhlcDisplay | null>(null);
   const [chartError, setChartError] = useState("");
   const [interval, setInterval] = useState<ChartInterval>("daily");
+  const [visibleMA, setVisibleMA] = useState<Record<number, boolean>>({ 5: true, 10: true, 20: true });
+  const [showMargin, setShowMargin] = useState(false);
+  const [showShort, setShowShort] = useState(false);
+  const [showMacd, setShowMacd] = useState(true);
 
   const rows = useMemo(() => normalizeQuotes(quotes), [quotes]);
-  const baseRows = useMemo(() => (rows.length ? rows : sampleHistory), [rows]);
-  const chartRows = useMemo(() => aggregateRows(baseRows, interval), [baseRows, interval]);
+  const chartRows = useMemo(() => aggregateRows(rows, interval), [rows, interval]);
+  const alignedMargin = useMemo(() => alignMarginRows(chartRows, margin, interval), [chartRows, margin, interval]);
   const latest = hovered ?? chartRows[chartRows.length - 1] ?? null;
-  const usingSample = rows.length === 0;
+  const latestIndex = latest ? chartRows.findIndex(row => row.time === latest.time) : -1;
+  const priorClose = latestIndex > 0 ? chartRows[latestIndex - 1].close : null;
+  const changePct = latest && priorClose ? (latest.close / priorClose - 1) * 100 : null;
+  const hoveredMargin = latest ? alignedMargin.find(row => row.time === latest.time) : null;
+  const paneCount = Number(showMargin || showShort) + Number(showMacd);
+  const height = CHART_HEIGHT + paneCount * 135;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -83,8 +81,8 @@ export function CandlestickVolumeChart({ quotes }: { quotes: PriceQuote[] }) {
     try {
       setChartError("");
       chart = createChart(container, {
-        width: Math.max(container.clientWidth, 320),
-        height: CHART_HEIGHT,
+        width: Math.max(container.clientWidth, 1),
+        height,
         layout: {
           background: { type: ColorType.Solid, color: "#131722" },
           textColor: "#aeb8be"
@@ -99,10 +97,15 @@ export function CandlestickVolumeChart({ quotes }: { quotes: PriceQuote[] }) {
         rightPriceScale: {
           borderColor: "rgba(174, 184, 190, 0.22)"
         },
+        leftPriceScale: {
+          visible: showMargin && showShort,
+          borderColor: "rgba(174, 184, 190, 0.22)"
+        },
         timeScale: {
           borderColor: "rgba(174, 184, 190, 0.22)",
           fixLeftEdge: true,
           fixRightEdge: true,
+          rightBarStaysOnScroll: true,
           rightOffset: 0,
           timeVisible: true,
           secondsVisible: false
@@ -141,6 +144,41 @@ export function CandlestickVolumeChart({ quotes }: { quotes: PriceQuote[] }) {
       const ma5Series = chartApi.addSeries(LineSeries, { color: "#f2c36b", lineWidth: 2, lastValueVisible: false, priceLineVisible: false, autoscaleInfoProvider: () => buildVisiblePriceScale(chartApi, chartRows) });
       const ma10Series = chartApi.addSeries(LineSeries, { color: "#64a6ff", lineWidth: 2, lastValueVisible: false, priceLineVisible: false, autoscaleInfoProvider: () => buildVisiblePriceScale(chartApi, chartRows) });
       const ma20Series = chartApi.addSeries(LineSeries, { color: "#c084fc", lineWidth: 2, lastValueVisible: false, priceLineVisible: false, autoscaleInfoProvider: () => buildVisiblePriceScale(chartApi, chartRows) });
+      const maSeries = [ma5Series, ma10Series, ma20Series];
+      [5, 10, 20].forEach((period, index) => maSeries[index].applyOptions({ visible: visibleMA[period] }));
+
+      let nextPane = 1;
+      if (showMargin || showShort) {
+        chartApi.addPane();
+        if (showMargin) {
+          const marginSeries = chartApi.addSeries(LineSeries, { color: "#f2c36b", lineWidth: 2, priceScaleId: showShort ? "left" : "right", title: "融資（張）", lastValueVisible: true, priceLineVisible: false }, nextPane);
+          marginSeries.setData(alignedMargin.filter(row => row.margin != null).map(row => ({ time: row.time as Time, value: row.margin! })));
+        }
+        if (showShort) {
+          const shortSeries = chartApi.addSeries(LineSeries, { color: "#64a6ff", lineWidth: 2, priceScaleId: "right", title: "融券（張）", lastValueVisible: true, priceLineVisible: false }, nextPane);
+          shortSeries.setData(alignedMargin.filter(row => row.short != null).map(row => ({ time: row.time as Time, value: row.short! })));
+        }
+        if (showMargin && showShort) {
+          chartApi.priceScale("left", nextPane).applyOptions({ borderColor: "#f2c36b", scaleMargins: { top: 0.2, bottom: 0.15 } });
+        }
+        chartApi.priceScale("right", nextPane).applyOptions({ borderColor: showShort ? "#64a6ff" : "#f2c36b", scaleMargins: { top: 0.2, bottom: 0.15 } });
+        nextPane += 1;
+      }
+      if (showMacd) {
+        chartApi.addPane();
+        const difSeries = chartApi.addSeries(LineSeries, { color: "#f2c36b", lineWidth: 2, title: "DIF", lastValueVisible: true, priceLineVisible: false });
+        const signalSeries = chartApi.addSeries(LineSeries, { color: "#c084fc", lineWidth: 2, title: "Signal", lastValueVisible: true, priceLineVisible: false });
+        const histSeries = chartApi.addSeries(HistogramSeries, { title: "MACD 柱", lastValueVisible: false, priceLineVisible: false });
+        difSeries.moveToPane(nextPane);
+        signalSeries.moveToPane(nextPane);
+        histSeries.moveToPane(nextPane);
+        const macd = buildMacd(chartRows);
+        difSeries.setData(macd.map(row => ({ time: row.time as Time, value: row.dif })));
+        signalSeries.setData(macd.map(row => ({ time: row.time as Time, value: row.signal })));
+        histSeries.setData(macd.map(row => ({ time: row.time as Time, value: row.hist, color: row.hist > 0 ? "rgba(255,95,109,.58)" : row.hist < 0 ? "rgba(61,214,181,.58)" : "rgba(174,184,190,.45)" })));
+        chartApi.priceScale("right", nextPane).applyOptions({ scaleMargins: { top: 0.15, bottom: 0.15 } });
+      }
+      chartApi.panes()[0]?.setStretchFactor(2.4);
 
       chartApi.priceScale("volume").applyOptions({
         scaleMargins: {
@@ -178,8 +216,8 @@ export function CandlestickVolumeChart({ quotes }: { quotes: PriceQuote[] }) {
       if (typeof ResizeObserver !== "undefined") {
         resizeObserver = new ResizeObserver(([entry]) => {
           if (disposed || !chart) return;
-          const width = Math.max(Math.floor(entry.contentRect.width), 320);
-          chart.applyOptions({ width, height: CHART_HEIGHT });
+          const width = Math.max(Math.floor(entry.contentRect.width), 1);
+          chart.applyOptions({ width, height });
         });
         resizeObserver.observe(container);
       }
@@ -198,20 +236,21 @@ export function CandlestickVolumeChart({ quotes }: { quotes: PriceQuote[] }) {
       chartRef.current = null;
       candleSeriesRef.current = null;
     };
-  }, [chartRows]);
+  }, [chartRows, alignedMargin, height, showMargin, showShort, showMacd, visibleMA]);
 
   return (
     <div className="tv-chart-shell">
       <div className="tv-chart-toolbar">
         <div>
           <strong>{latest ? `開 ${formatPrice(latest.open)} 高 ${formatPrice(latest.high)} 低 ${formatPrice(latest.low)} 收 ${formatPrice(latest.close)}` : "開高低收 -"}</strong>
-          <span>{latest ? `${latest.time}｜Vol ${formatVolume(latest.volume)}` : "等待資料"}</span>
+          <span>{latest ? <>{latest.time}｜<b className={changePct == null || changePct === 0 ? "" : changePct > 0 ? "positive" : "negative"}>{!hovered && !latestQuoteIsCurrent ? `最後成交${interval === "daily" ? "日" : interval === "weekly" ? "週" : "月"}漲跌` : `${intervalLabels[interval]}漲跌`} {changePct == null ? "—" : `${changePct > 0 ? "+" : ""}${changePct.toFixed(2)}%`}</b>｜Vol {formatVolume(latest.volume)}</> : "等待真實股價資料"}</span>
+          {(showMargin || showShort) && <span>{hoveredMargin ? `官方 ${hoveredMargin.reportDate}｜${showMargin ? `融資 ${hoveredMargin.margin?.toLocaleString() ?? "—"} 張` : ""}${showMargin && showShort ? " · " : ""}${showShort ? `融券 ${hoveredMargin.short?.toLocaleString() ?? "—"} 張` : ""}` : "所選日期沒有同期間融資融券日報"}</span>}
         </div>
         <div className="ma-legend" aria-label="Moving averages">
           <span>{intervalLabels[interval]}</span>
-          <span className="ma5">MA5</span>
-          <span className="ma10">MA10</span>
-          <span className="ma20">MA20</span>
+          {visibleMA[5] && <span className="ma5">MA5</span>}
+          {visibleMA[10] && <span className="ma10">MA10</span>}
+          {visibleMA[20] && <span className="ma20">MA20</span>}
         </div>
       </div>
       <div className="chart-interval-controls" aria-label="Chart interval">
@@ -229,15 +268,18 @@ export function CandlestickVolumeChart({ quotes }: { quotes: PriceQuote[] }) {
           </button>
         ))}
       </div>
-      <div className="tv-chart" ref={containerRef}>
+      <div className="chart-overlay-controls" aria-label="圖表線條切換">
+        {[5, 10, 20].map(period => <label key={period}><input type="checkbox" checked={visibleMA[period]} onChange={event => setVisibleMA(current => ({ ...current, [period]: event.target.checked }))} /> MA{period}</label>)}
+        <label><input type="checkbox" checked={showMargin} onChange={event => setShowMargin(event.target.checked)} disabled={!margin.length} /> 融資張數</label>
+        <label><input type="checkbox" checked={showShort} onChange={event => setShowShort(event.target.checked)} disabled={!margin.length} /> 融券張數</label>
+        <label><input type="checkbox" checked={showMacd} onChange={event => setShowMacd(event.target.checked)} /> MACD</label>
+      </div>
+      {(showMargin || showShort) && <p className="chart-unit-note">融資、融券與股價共用日期軸；{showMargin && showShort ? "融資在左軸（張），融券在右軸（張）" : `${showMargin ? "融資" : "融券"}在右軸（張）`}，位於 K 線下方的獨立圖層。缺報日期不補零。</p>}
+      {showMacd && <p className="chart-unit-note">下方 MACD：DIF＝EMA12－EMA26，訊號線＝DIF 的 EMA9，柱狀＝DIF－訊號線；依目前日／週／月 K 收盤價計算。</p>}
+      <div className="tv-chart" ref={containerRef} style={{ height }}>
         {chartError ? <div className="chart-fallback">圖表暫時無法載入：{chartError}</div> : null}
       </div>
-      {usingSample ? (
-        <details className="sample-json">
-          <summary>模擬歷史股價 JSON</summary>
-          <pre>{JSON.stringify(sampleHistory, null, 2)}</pre>
-        </details>
-      ) : null}
+      {!rows.length && <p className="chart-unit-note">尚無真實股價資料；請先更新此股票行情。</p>}
     </div>
   );
 }
@@ -255,12 +297,13 @@ function setSeriesData(
     open: row.open,
     high: row.high,
     low: row.low,
-    close: row.close
+    close: row.close,
+    ...(row.close === row.open ? { color: "#aeb8be", borderColor: "#aeb8be", wickColor: "#aeb8be" } : {})
   })));
   volumeSeries.setData(rows.map((row) => ({
     time: row.time as Time,
     value: row.volume,
-    color: row.close >= row.open ? "rgba(255, 95, 109, 0.62)" : "rgba(61, 214, 181, 0.62)"
+    color: row.close > row.open ? "rgba(255, 95, 109, 0.62)" : row.close < row.open ? "rgba(61, 214, 181, 0.62)" : "rgba(174,184,190,.45)"
   })));
   ma5Series.setData(buildMovingAverage(rows, 5));
   ma10Series.setData(buildMovingAverage(rows, 10));
@@ -309,7 +352,7 @@ function removeHoverCloseLine(series: ISeriesApi<"Candlestick">, currentLine: IP
 }
 
 function fitDataRange(chart: IChartApi, rowCount: number, interval: ChartInterval) {
-  if (rowCount <= 0) return;
+  if (rowCount < 2) return;
   if (interval === "daily") {
     const visibleRows = Math.min(rowCount, 84);
     chart.timeScale().setVisibleLogicalRange({
@@ -320,7 +363,7 @@ function fitDataRange(chart: IChartApi, rowCount: number, interval: ChartInterva
   }
   chart.timeScale().setVisibleLogicalRange({
     from: 0,
-    to: Math.max(rowCount - 1, 0)
+    to: rowCount - 1
   });
 }
 
@@ -408,6 +451,32 @@ function buildMovingAverage(rows: ChartRow[], windowSize: number) {
       return { time: row.time as Time, value };
     })
     .filter((item): item is { time: Time; value: number } => item !== null);
+}
+
+function alignMarginRows(rows: ChartRow[], reports: MarginRow[], interval: ChartInterval) {
+  const byPeriod = new Map<string, MarginRow[]>();
+  for (const report of reports) {
+    const key = interval === "daily" ? report.trade_date : interval === "weekly" ? getWeekKey(report.trade_date) : report.trade_date.slice(0, 7);
+    byPeriod.set(key, [...(byPeriod.get(key) || []), report]);
+  }
+  return rows.flatMap(row => {
+    const key = interval === "daily" ? row.time : interval === "weekly" ? getWeekKey(row.time) : row.time.slice(0, 7);
+    const report = (byPeriod.get(key) || []).filter(item => item.trade_date <= row.time).sort((a, b) => b.trade_date.localeCompare(a.trade_date))[0];
+    return report ? [{ time: row.time, reportDate: report.trade_date, margin: report.margin_balance_lots, short: report.short_balance_lots }] : [];
+  });
+}
+
+function buildMacd(rows: ChartRow[]) {
+  let ema12: number | null = null;
+  let ema26: number | null = null;
+  let signal: number | null = null;
+  return rows.map(row => {
+    ema12 = ema12 == null ? row.close : ema12 + (2 / 13) * (row.close - ema12);
+    ema26 = ema26 == null ? row.close : ema26 + (2 / 27) * (row.close - ema26);
+    const dif = ema12 - ema26;
+    signal = signal == null ? dif : signal + (2 / 10) * (dif - signal);
+    return { time: row.time, dif, signal, hist: dif - signal };
+  });
 }
 
 function formatPrice(value: number) {

@@ -1,0 +1,100 @@
+name: trade
+
+x-api-environment: &api-environment
+  TRADE_DATA_DIR: /trade/data
+  TRADE_DB_DIR: /trade/data/db
+  TRADE_RAW_DATA_DIR: /trade/data/raw
+  TRADE_PROCESSED_DATA_DIR: /trade/data/processed
+  TRADE_CACHE_DIR: /trade/data/cache
+  TRADE_LOGS_DIR: /trade/logs
+  TRADE_BACKUPS_DIR: /trade/backups
+  TRADE_WEB_BOOTSTRAP_PRICE_ENABLED: ${TRADE_WEB_BOOTSTRAP_PRICE_ENABLED:-0}
+  TRADE_ENABLE_BACKTEST: ${TRADE_ENABLE_BACKTEST:-0}
+  TRADE_API_DATA_JOB_WORKERS: ${TRADE_API_DATA_JOB_WORKERS:-1}
+  OMP_NUM_THREADS: "1"
+  OPENBLAS_NUM_THREADS: "1"
+  MKL_NUM_THREADS: "1"
+  TZ: Asia/Taipei
+
+x-data-volumes: &data-volumes
+  - ${TRADE_NAS_ROOT:?Set TRADE_NAS_ROOT}/data:/trade/data
+  - ${TRADE_NAS_ROOT:?Set TRADE_NAS_ROOT}/logs:/trade/logs
+  - ${TRADE_NAS_ROOT:?Set TRADE_NAS_ROOT}/backups:/trade/backups
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    image: trade-api:local
+    environment: *api-environment
+    volumes: *data-volumes
+    mem_limit: 1400m
+    cpus: 1.5
+    pids_limit: 128
+    restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    logging: *logging
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).read()"]
+      interval: 30s
+      timeout: 6s
+      start_period: 40s
+      retries: 3
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    image: trade-web:local
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${TRADE_BIND_IP:-127.0.0.1}:${TRADE_WEB_PORT:-8080}:80"
+    mem_limit: 128m
+    cpus: 0.5
+    pids_limit: 64
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    logging: *logging
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/health"]
+      interval: 30s
+      timeout: 6s
+      start_period: 20s
+      retries: 3
+
+  scheduler:
+    image: trade-api:local
+    command: ["python", "-m", "apps.worker.nas_scheduler"]
+    environment:
+      <<: *api-environment
+      TRADE_DAILY_TIME: ${TRADE_DAILY_TIME:-18:45}
+      TRADE_EVENTS_TIME: ${TRADE_EVENTS_TIME:-08:30}
+      TRADE_EVENTS_EVENING_TIME: ${TRADE_EVENTS_EVENING_TIME:-20:30}
+      TRADE_BROKER_IMPORT_TIME: ${TRADE_BROKER_IMPORT_TIME:-21:00}
+    volumes: *data-volumes
+    mem_limit: 1100m
+    cpus: 1.0
+    pids_limit: 128
+    restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    logging: *logging
+    healthcheck:
+      test: ["CMD", "python", "-m", "apps.worker.nas_scheduler", "--health"]
+      interval: 60s
+      timeout: 6s
+      start_period: 30s
+      retries: 3

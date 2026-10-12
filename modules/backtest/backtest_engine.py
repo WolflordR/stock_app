@@ -141,6 +141,7 @@ def _build_trade_record(*, buy_date, buy_price, sell_date, sell_price, trading_c
         "near_breakout_score": active_setup.get("near_breakout_score"),
         "bowl_volume_score": active_setup.get("bowl_volume_score"),
         "momentum_volume_score": active_setup.get("momentum_volume_score"),
+        "initial_rise_score": active_setup.get("initial_rise_score"),
         "buy_turnover_value": active_setup.get("turnover_value"),
     }
 
@@ -224,6 +225,17 @@ def check_stock(
     momentum_volume_volume_ma_period=20,
     momentum_volume_volume_multiplier=2.0,
     momentum_volume_volume_lookback=3,
+    initial_rise_max_5d_gain_pct=8.0,
+    initial_rise_max_10d_gain_pct=15.0,
+    initial_rise_min_today_gain_pct=2.0,
+    initial_rise_max_today_gain_pct=7.0,
+    initial_rise_volume_ma_period=20,
+    initial_rise_min_volume_ratio=1.3,
+    initial_rise_quiet_volume_days=3,
+    initial_rise_consolidation_days=20,
+    initial_rise_max_range_width_pct=15.0,
+    initial_rise_breakout_days=10,
+    initial_rise_min_close_position=0.7,
     history_buffer_days=120,
 ):
     try:
@@ -236,6 +248,7 @@ def check_stock(
             start_date,
             end_date,
             history_buffer_days=history_buffer_days,
+            allow_remote_fetch=False,
         )
         if df.empty or len(df) < 20:
             return None
@@ -297,6 +310,17 @@ def check_stock(
             "momentum_volume_volume_ma_period": momentum_volume_volume_ma_period,
             "momentum_volume_volume_multiplier": momentum_volume_volume_multiplier,
             "momentum_volume_volume_lookback": momentum_volume_volume_lookback,
+            "initial_rise_max_5d_gain_pct": initial_rise_max_5d_gain_pct,
+            "initial_rise_max_10d_gain_pct": initial_rise_max_10d_gain_pct,
+            "initial_rise_min_today_gain_pct": initial_rise_min_today_gain_pct,
+            "initial_rise_max_today_gain_pct": initial_rise_max_today_gain_pct,
+            "initial_rise_volume_ma_period": initial_rise_volume_ma_period,
+            "initial_rise_min_volume_ratio": initial_rise_min_volume_ratio,
+            "initial_rise_quiet_volume_days": initial_rise_quiet_volume_days,
+            "initial_rise_consolidation_days": initial_rise_consolidation_days,
+            "initial_rise_max_range_width_pct": initial_rise_max_range_width_pct,
+            "initial_rise_breakout_days": initial_rise_breakout_days,
+            "initial_rise_min_close_position": initial_rise_min_close_position,
             "stock_id": stock_id,
         }
 
@@ -554,6 +578,31 @@ def check_stock(
                 "momentum_volume_return_10d_pct": buy_setup.get("momentum_volume_return_10d_pct"),
                 "momentum_volume_positive_reasons": buy_setup.get("momentum_volume_positive_reasons") or [],
                 "momentum_volume_caution_reasons": buy_setup.get("momentum_volume_caution_reasons") or [],
+                "initial_rise_score": buy_setup.get("initial_rise_score"),
+                "initial_rise_latest_close": buy_setup.get("initial_rise_latest_close"),
+                "initial_rise_today_return_pct": buy_setup.get("initial_rise_today_return_pct"),
+                "initial_rise_pre_5d_gain_pct": buy_setup.get("initial_rise_pre_5d_gain_pct"),
+                "initial_rise_pre_10d_gain_pct": buy_setup.get("initial_rise_pre_10d_gain_pct"),
+                "initial_rise_latest_volume": buy_setup.get("initial_rise_latest_volume"),
+                "initial_rise_avg_volume_20d": buy_setup.get("initial_rise_avg_volume_20d"),
+                "initial_rise_volume_ratio_today": buy_setup.get("initial_rise_volume_ratio_today"),
+                "initial_rise_max_previous_volume_ratio": buy_setup.get("initial_rise_max_previous_volume_ratio"),
+                "initial_rise_quiet_volume_days": buy_setup.get("initial_rise_quiet_volume_days"),
+                "initial_rise_consolidation_days": buy_setup.get("initial_rise_consolidation_days"),
+                "initial_rise_range_width_pct": buy_setup.get("initial_rise_range_width_pct"),
+                "initial_rise_breakout_days": buy_setup.get("initial_rise_breakout_days"),
+                "initial_rise_breakout_close": buy_setup.get("initial_rise_breakout_close"),
+                "initial_rise_breakout_confirmed": buy_setup.get("initial_rise_breakout_confirmed"),
+                "initial_rise_close_position": buy_setup.get("initial_rise_close_position"),
+                "initial_rise_bullish_candle": buy_setup.get("initial_rise_bullish_candle"),
+                "initial_rise_pre_gain_ok": buy_setup.get("initial_rise_pre_gain_ok"),
+                "initial_rise_today_gain_ok": buy_setup.get("initial_rise_today_gain_ok"),
+                "initial_rise_volume_expanded": buy_setup.get("initial_rise_volume_expanded"),
+                "initial_rise_quiet_before": buy_setup.get("initial_rise_quiet_before"),
+                "initial_rise_consolidation_ok": buy_setup.get("initial_rise_consolidation_ok"),
+                "initial_rise_candle_ok": buy_setup.get("initial_rise_candle_ok"),
+                "initial_rise_positive_reasons": buy_setup.get("initial_rise_positive_reasons") or [],
+                "initial_rise_caution_reasons": buy_setup.get("initial_rise_caution_reasons") or [],
             }
         return None
     except Exception as exc:
@@ -569,6 +618,7 @@ def _sort_scan_results(results):
         for key in (
             "bowl_volume_score",
             "momentum_volume_score",
+            "initial_rise_score",
             "near_breakout_score",
             "pullback_score",
             "high_price_pullback_score",
@@ -658,8 +708,20 @@ def scan_market(
     momentum_volume_volume_ma_period=20,
     momentum_volume_volume_multiplier=2.0,
     momentum_volume_volume_lookback=3,
+    initial_rise_max_5d_gain_pct=8.0,
+    initial_rise_max_10d_gain_pct=15.0,
+    initial_rise_min_today_gain_pct=2.0,
+    initial_rise_max_today_gain_pct=7.0,
+    initial_rise_volume_ma_period=20,
+    initial_rise_min_volume_ratio=1.3,
+    initial_rise_quiet_volume_days=3,
+    initial_rise_consolidation_days=20,
+    initial_rise_max_range_width_pct=15.0,
+    initial_rise_breakout_days=10,
+    initial_rise_min_close_position=0.7,
     progress_callback=None,
     status_callback=None,
+    should_stop=None,
 ):
     ensure_stock_db()
     picked_dict = {}
@@ -693,6 +755,8 @@ def scan_market(
         return picked_dict
 
     for i, security in enumerate(securities, start=1):
+        if should_stop and should_stop():
+            break
         stock_code = security["yfinance_symbol"]
         if status_text:
             status_text.caption(f"🔄 正在回測模擬: {stock_code} ...")
@@ -767,6 +831,17 @@ def scan_market(
             momentum_volume_volume_ma_period,
             momentum_volume_volume_multiplier,
             momentum_volume_volume_lookback,
+            initial_rise_max_5d_gain_pct,
+            initial_rise_max_10d_gain_pct,
+            initial_rise_min_today_gain_pct,
+            initial_rise_max_today_gain_pct,
+            initial_rise_volume_ma_period,
+            initial_rise_min_volume_ratio,
+            initial_rise_quiet_volume_days,
+            initial_rise_consolidation_days,
+            initial_rise_max_range_width_pct,
+            initial_rise_breakout_days,
+            initial_rise_min_close_position,
             history_buffer_days,
         )
 

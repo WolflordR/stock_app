@@ -90,6 +90,17 @@ def init_official_broker_db():
         conn.commit()
 
 
+def get_imported_report_keys(*, market: str) -> set[tuple[str, str]]:
+    """Return (trade_date, stock_code) pairs already present in the broker DB."""
+    init_official_broker_db()
+    with _get_connection() as conn:
+        rows = conn.execute(
+            "SELECT trade_date, stock_code FROM broker_trade_reports WHERE market = ?",
+            (_normalize_market(market),),
+        ).fetchall()
+    return {(str(row["trade_date"]), str(row["stock_code"])) for row in rows}
+
+
 def _parse_number(value: Any) -> float | None:
     if value is None:
         return None

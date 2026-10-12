@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from modules.core.project_paths import raw_data_path
-from modules.data_sources.official_broker_import import import_official_broker_csv
+from modules.data_sources.official_broker_import import get_imported_report_keys, import_official_broker_csv
 
 
 def _extract_stock_code(path: Path) -> str | None:
@@ -28,6 +28,7 @@ def import_broker_csv_folder(
     trade_date: str | None = None,
     limit: int | None = None,
     dry_run: bool = False,
+    missing_only: bool = False,
     progress_every: int = 0,
 ) -> dict[str, Any]:
     base_root = Path(root) if root else raw_data_path("broker") / market.lower()
@@ -35,6 +36,7 @@ def import_broker_csv_folder(
     csv_files = sorted(scan_root.rglob("*.csv"))
     if limit:
         csv_files = csv_files[: int(limit)]
+    imported_keys = get_imported_report_keys(market=market) if missing_only else set()
 
     imported: list[dict[str, Any]] = []
     failed: list[dict[str, str]] = []
@@ -48,6 +50,9 @@ def import_broker_csv_folder(
             continue
         if not file_trade_date:
             skipped.append({"file": str(csv_path), "reason": "路徑找不到 YYYY-MM-DD 日期"})
+            continue
+        if (file_trade_date, stock_code) in imported_keys:
+            skipped.append({"file": str(csv_path), "reason": "已匯入"})
             continue
         if dry_run:
             imported.append(
@@ -71,6 +76,7 @@ def import_broker_csv_folder(
                     source="TWSE_CSV_FOLDER" if market.upper() == "TWSE" else "TPEX_CSV_FOLDER",
                 )
             )
+            imported_keys.add((file_trade_date, stock_code))
         except Exception as exc:
             failed.append({"file": str(csv_path), "reason": str(exc)})
         if progress_every and index % progress_every == 0:
@@ -94,13 +100,14 @@ def import_broker_csv_folder(
     }
 
 
-def main() -> None:
+def main() -> int:
     parser = argparse.ArgumentParser(description="Import manually downloaded broker branch CSV files.")
     parser.add_argument("--root", default=None, help="Folder to scan. Defaults to data/raw/broker/{market}.")
     parser.add_argument("--market", default="TWSE", choices=["TWSE", "TPEX"], help="Market code.")
     parser.add_argument("--date", default=None, help="Trade date folder, for example 2026-09-04.")
     parser.add_argument("--limit", type=int, default=None, help="Import only the first N files.")
     parser.add_argument("--dry-run", action="store_true", help="Preview files without writing the database.")
+    parser.add_argument("--missing-only", action="store_true", help="Import only reports not yet present in the database.")
     parser.add_argument("--progress-every", type=int, default=100, help="Print progress every N files.")
     args = parser.parse_args()
 
@@ -110,6 +117,7 @@ def main() -> None:
         trade_date=args.date,
         limit=args.limit,
         dry_run=args.dry_run,
+        missing_only=args.missing_only,
         progress_every=args.progress_every,
     )
     print(
@@ -124,7 +132,8 @@ def main() -> None:
         print("略過範例：")
         for item in result["skipped"][:5]:
             print(f"- {item['file']}: {item['reason']}")
+    return 1 if result["failed_count"] else 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

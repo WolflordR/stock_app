@@ -75,6 +75,17 @@ class BacktestScanRequest:
     momentum_volume_volume_ma_period: int = 20
     momentum_volume_volume_multiplier: float = 2.0
     momentum_volume_volume_lookback: int = 3
+    initial_rise_max_5d_gain_pct: float = 8.0
+    initial_rise_max_10d_gain_pct: float = 15.0
+    initial_rise_min_today_gain_pct: float = 2.0
+    initial_rise_max_today_gain_pct: float = 7.0
+    initial_rise_volume_ma_period: int = 20
+    initial_rise_min_volume_ratio: float = 1.3
+    initial_rise_quiet_volume_days: int = 3
+    initial_rise_consolidation_days: int = 20
+    initial_rise_max_range_width_pct: float = 15.0
+    initial_rise_breakout_days: int = 10
+    initial_rise_min_close_position: float = 0.7
 
     @classmethod
     def from_sidebar_state(cls, state: dict[str, Any]) -> "BacktestScanRequest":
@@ -147,6 +158,17 @@ class BacktestScanRequest:
             momentum_volume_volume_ma_period=int(state.get("momentum_volume_volume_ma_period", 20)),
             momentum_volume_volume_multiplier=float(state.get("momentum_volume_volume_multiplier", 2.0)),
             momentum_volume_volume_lookback=int(state.get("momentum_volume_volume_lookback", 3)),
+            initial_rise_max_5d_gain_pct=float(state.get("initial_rise_max_5d_gain_pct", 8.0)),
+            initial_rise_max_10d_gain_pct=float(state.get("initial_rise_max_10d_gain_pct", 15.0)),
+            initial_rise_min_today_gain_pct=float(state.get("initial_rise_min_today_gain_pct", 2.0)),
+            initial_rise_max_today_gain_pct=float(state.get("initial_rise_max_today_gain_pct", 7.0)),
+            initial_rise_volume_ma_period=int(state.get("initial_rise_volume_ma_period", 20)),
+            initial_rise_min_volume_ratio=float(state.get("initial_rise_min_volume_ratio", 1.3)),
+            initial_rise_quiet_volume_days=int(state.get("initial_rise_quiet_volume_days", 3)),
+            initial_rise_consolidation_days=int(state.get("initial_rise_consolidation_days", 20)),
+            initial_rise_max_range_width_pct=float(state.get("initial_rise_max_range_width_pct", 15.0)),
+            initial_rise_breakout_days=int(state.get("initial_rise_breakout_days", 10)),
+            initial_rise_min_close_position=float(state.get("initial_rise_min_close_position", 0.7)),
         )
 
     def to_engine_kwargs(self) -> dict[str, Any]:

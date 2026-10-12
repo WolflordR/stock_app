@@ -22,7 +22,7 @@
 1. Improve stock detail broker branch table with multi-day controls.
 2. Improve ETF snapshot date picker and empty-state text.
 3. Expand strong-stock ranking filters.
-4. Replace mock US economic calendar with a real source.
+4. ~~Replace mock US economic calendar with a real source.~~ Completed with New York Fed releases and Federal Reserve FOMC schedule; dates display in Taiwan time with a local cache.
 
 ## P3 Cleanup
 

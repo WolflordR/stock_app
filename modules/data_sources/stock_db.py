@@ -10,7 +10,7 @@ from modules.core.project_paths import db_path
 DB_PATH = db_path("stocks.db")
 
 LISTED_CSV_URL = "https://mopsfin.twse.com.tw/opendata/t187ap03_L.csv"
-OTC_CSV_URL = "https://dts.twse.com.tw/opendata/t187ap03_O.csv"
+OTC_CSV_URL = "https://mopsfin.twse.com.tw/opendata/t187ap03_O.csv"
 
 
 def _get_connection():
@@ -253,6 +253,42 @@ def find_security(stock_input):
         ).fetchone()
 
     return dict(row) if row else None
+
+
+def search_securities(query: str, limit: int = 12) -> list[dict]:
+    """Search the local listed/OTC stock master for autocomplete choices."""
+    init_stock_db()
+    term = (query or "").strip()[:40]
+    if not term:
+        return []
+    # Treat user input literally, including SQL LIKE wildcard characters.
+    escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    prefix, contains = f"{escaped}%", f"%{escaped}%"
+    with _get_connection() as conn:
+        rows = conn.execute(
+            """SELECT code,name_zh,market,yfinance_symbol,updated_at FROM securities
+               WHERE code LIKE ? ESCAPE '\\' OR name_zh LIKE ? ESCAPE '\\'
+                  OR full_name_zh LIKE ? ESCAPE '\\'
+               ORDER BY CASE
+                   WHEN code=? THEN 0
+                   WHEN name_zh=? THEN 1
+                   WHEN code LIKE ? ESCAPE '\\' THEN 2
+                   WHEN name_zh LIKE ? ESCAPE '\\' THEN 3
+                   WHEN full_name_zh LIKE ? ESCAPE '\\' THEN 4
+                   ELSE 5 END,
+                   name_zh, code,
+                   CASE market WHEN 'TWSE' THEN 0 ELSE 1 END,
+                   updated_at DESC
+               LIMIT ?""",
+            (prefix, contains, contains, term, term, prefix, prefix, prefix, max(1, min(limit * 4, 100))),
+        ).fetchall()
+    # A company can retain an older market symbol after a listing transfer.
+    unique = {}
+    for row in rows:
+        unique.setdefault(row["code"], {"code": row["code"], "name_zh": row["name_zh"], "market": row["market"]})
+        if len(unique) >= limit:
+            break
+    return list(unique.values())
 
 
 def get_security_share_profile(stock_input):

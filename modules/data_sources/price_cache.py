@@ -132,7 +132,10 @@ def _normalize_history_df(df):
         index=pd.to_datetime(df.index).normalize(),
     )
     normalized = normalized[~normalized.index.duplicated(keep="last")]
-    return normalized.dropna(subset=["Open", "High", "Low", "Close"])
+    # Yahoo may emit a synthetic OHLC bar on a no-trade or suspended day.
+    # Its reference price can jump even though no share changed hands.
+    normalized = normalized.dropna(subset=["Open", "High", "Low", "Close"])
+    return normalized[normalized["Volume"].gt(0)].copy()
 
 
 def _get_cache_bounds(symbol):
@@ -141,7 +144,7 @@ def _get_cache_bounds(symbol):
             """
             SELECT MIN(trade_date) AS min_date, MAX(trade_date) AS max_date, COUNT(*) AS row_count
             FROM price_history
-            WHERE symbol = ?
+            WHERE symbol = ? AND volume > 0
             """,
             (symbol,),
         ).fetchone()
@@ -207,7 +210,7 @@ def _load_cached_history(symbol, start_dt, end_dt):
             """
             SELECT trade_date, open, high, low, close, volume
             FROM price_history
-            WHERE symbol = ? AND trade_date >= ? AND trade_date < ?
+            WHERE symbol = ? AND trade_date >= ? AND trade_date < ? AND volume > 0
             ORDER BY trade_date
             """,
             (
@@ -419,6 +422,7 @@ def fetch_price_history(
     end_date=None,
     history_buffer_days=120,
     include_indicators=False,
+    allow_remote_fetch=True,
 ):
     """先查本地快取，缺資料時再向 yfinance 抓取。"""
     init_price_cache()
@@ -453,27 +457,28 @@ def fetch_price_history(
         meta.get("last_checked_date"),
     )
 
-    for fetch_start, fetch_end in missing_ranges:
-        checked_through = _format_date(fetch_end - timedelta(days=1))
-        try:
-            fetched_df = _fetch_remote_history(symbol, fetch_start, fetch_end)
-            _save_history(symbol, fetched_df)
-            _update_cache_meta(
-                symbol,
-                checked_through=checked_through,
-                source="yfinance",
-                fetch_status="ready",
-                last_error=None,
-            )
-        except Exception as exc:
-            _update_cache_meta(
-                symbol,
-                checked_through=checked_through,
-                source="yfinance",
-                fetch_status="failed",
-                last_error=str(exc),
-            )
-            raise
+    if allow_remote_fetch:
+        for fetch_start, fetch_end in missing_ranges:
+            checked_through = _format_date(fetch_end - timedelta(days=1))
+            try:
+                fetched_df = _fetch_remote_history(symbol, fetch_start, fetch_end)
+                _save_history(symbol, fetched_df)
+                _update_cache_meta(
+                    symbol,
+                    checked_through=checked_through,
+                    source="yfinance",
+                    fetch_status="ready",
+                    last_error=None,
+                )
+            except Exception as exc:
+                _update_cache_meta(
+                    symbol,
+                    checked_through=checked_through,
+                    source="yfinance",
+                    fetch_status="failed",
+                    last_error=str(exc),
+                )
+                raise
 
     cached_df = _load_cached_history(symbol, request_start, request_end)
     normalized_df = _normalize_history_df(cached_df)

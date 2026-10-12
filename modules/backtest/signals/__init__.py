@@ -14,6 +14,7 @@ from modules.backtest.signals.basic import (
     strategy_volume_surge,
 )
 from modules.backtest.signals.gap import strategy_gap_support_rebound
+from modules.backtest.signals.initial_rise import analyze_initial_rise_candidate, strategy_initial_rise
 from modules.backtest.signals.pullback import (
     analyze_high_price_pullback_candidate,
     analyze_strong_pullback_rebound_candidate,
@@ -37,6 +38,7 @@ from modules.backtest.signals.w_bottom import strategy_w_bottom_rebound
 __all__ = [
     "analyze_bowl_bottom_volume_candidate",
     "analyze_high_price_pullback_candidate",
+    "analyze_initial_rise_candidate",
     "analyze_near_breakout_candidate",
     "analyze_strong_pullback_rebound_candidate",
     "analyze_vcp_candidate",
@@ -52,6 +54,7 @@ __all__ = [
     "strategy_gap_support_rebound",
     "strategy_golden_cross",
     "strategy_high_price_pullback",
+    "strategy_initial_rise",
     "strategy_ma_up",
     "strategy_minervini_template",
     "strategy_monthly_dip",

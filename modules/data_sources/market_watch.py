@@ -60,7 +60,7 @@ def _clean_number(value):
     if text in {"", "--", "---", "----", "除權息", "除息", "除權"}:
         return None
     text = re.sub(r"<[^>]+>", "", text)
-    text = text.replace(",", "").replace("X", "").replace("null", "")
+    text = text.replace(",", "").replace(" ", "").replace("X", "").replace("null", "")
     if text in {"", "-", "+"}:
         return None
     try:
@@ -151,7 +151,7 @@ def fetch_twse_daily_quotes(trade_date):
             return pd.DataFrame()
         return latest_df.copy()
 
-    if payload.get("stat") != "OK":
+    if payload.get("stat") != "OK" or str(payload.get("date")) != formatted_date:
         return pd.DataFrame()
 
     quote_table = next(
@@ -241,6 +241,8 @@ def fetch_tpex_daily_quotes(trade_date):
         payload = _request_json(url)
     except Exception:
         return pd.DataFrame()
+    if payload.get("stat") != "ok" or str(payload.get("date")) != _to_yyyymmdd(trade_date):
+        return pd.DataFrame()
     table = payload.get("tables", [{}])[0]
     fields = table.get("fields", [])
     rows = table.get("data", [])
@@ -262,9 +264,9 @@ def fetch_tpex_daily_quotes(trade_date):
             "volume": source_df["成交股數  "].map(_clean_number),
             "trades": source_df[" 成交筆數 "].map(_clean_number),
             "last_bid_price": source_df["最後買價"].map(_clean_number),
-            "last_bid_volume": source_df["最後買量<br>(張數)"].map(_clean_number),
+            "last_bid_volume": source_df["最後買量<br>(張數)"].map(_clean_number) if "最後買量<br>(張數)" in source_df else None,
             "last_ask_price": source_df["最後賣價"].map(_clean_number),
-            "last_ask_volume": source_df["最後賣量<br>(張數)"].map(_clean_number),
+            "last_ask_volume": source_df["最後賣量<br>(張數)"].map(_clean_number) if "最後賣量<br>(張數)" in source_df else None,
             "change_value": source_df["漲跌"].map(_clean_number),
         }
     )

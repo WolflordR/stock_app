@@ -24,11 +24,13 @@ def run_backtest_scan(
     *,
     progress_callback=None,
     status_callback=None,
+    should_stop=None,
 ):
     return scan_market(
         **request.to_engine_kwargs(),
         progress_callback=progress_callback,
         status_callback=status_callback,
+        should_stop=should_stop,
     )
 
 

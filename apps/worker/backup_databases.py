@@ -3,9 +3,10 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
+import sqlite3
 from datetime import datetime
 
-from modules.core.project_paths import backups_path, db_path
+from modules.core.project_paths import backups_path, data_path, db_path
 from packages.trade_core.data_files import ALL_DB_FILES
 
 
@@ -24,8 +25,25 @@ def backup_databases(*, label: str | None = None) -> dict[str, object]:
         if not source.exists():
             missing.append({"name": filename, "path": str(source)})
             continue
-        shutil.copy2(source, target)
+        temporary = target.with_name(target.name + ".tmp")
+        try:
+            with sqlite3.connect(source) as source_conn, sqlite3.connect(temporary) as target_conn:
+                source_conn.backup(target_conn)
+                if target_conn.execute("PRAGMA quick_check").fetchone()[0] != "ok":
+                    raise RuntimeError(f"Backup integrity check failed: {filename}")
+            temporary.replace(target)
+        finally:
+            temporary.unlink(missing_ok=True)
         copied.append({"name": filename, "source": str(source), "target": str(target)})
+
+    # The taxonomy packages are required to import the API at startup.
+    taxonomy_source = data_path("sector_rotation")
+    if taxonomy_source.is_dir():
+        shutil.copytree(taxonomy_source, backup_dir / "sector_rotation", dirs_exist_ok=True)
+    for name in ("industry_theme_overrides.csv", "short_term_broker_tags.csv", "review_queue_after_v4.csv"):
+        source = data_path(name)
+        if source.is_file():
+            shutil.copy2(source, backup_dir / name)
 
     return {
         "backup_dir": str(backup_dir),

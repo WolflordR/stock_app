@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from functools import lru_cache
+import os
 from typing import Any
 
 try:
-    from fastapi import FastAPI, Query
+    from fastapi import FastAPI, HTTPException, Query
     from fastapi.middleware.cors import CORSMiddleware
     from pydantic import BaseModel, Field
 except ImportError:  # pragma: no cover - lets this skeleton compile before deps are installed.
@@ -45,10 +47,20 @@ from modules.backtest.backtest_models import BacktestScanRequest
 from modules.backtest.backtest_service import validate_backtest_request
 from modules.news.news_analysis import build_news_analysis_bundle
 from modules.data_sources.official_broker_import import get_official_broker_db_overview
-from modules.data_sources.stock_db import find_security, get_securities_in_range, get_stock_db_status
+from modules.data_sources.financial_trends import get_stock_financial_trends
+from modules.data_sources.stock_db import find_security, get_securities_in_range, get_stock_db_status, search_securities
+from modules.data_sources.chip_trends import market_history, stock_margin_history, ownership_history
+from modules.etf.active_etf_watch import refresh_latest_active_etf_snapshots
+from modules.industry.electronics_universe import get_electronics_coverage, list_electronics, list_sectors, list_themes
+from modules.industry.sector_metrics import get_sector_ranking
+from modules.industry.fine_classification import get_fine_coverage
+from modules.industry.classification_v4 import get_stock_classification
+from modules.industry.rotation_v3 import get_rotation_detail, get_rotation_filters, get_rotation_ranking
 from modules.market_map.market_map_db import get_market_map_status
 from modules.core.job_managers import BackgroundDataJobManager, BacktestJobManager
 from modules.watchlist_store import add_watchlist_item, create_watchlist_group, get_watchlists, remove_watchlist_item
+from services.dashboard import build_dashboard
+from services.events.company_events import list_events
 from apps.worker.update_price_cache import update_stocks
 from packages.trade_core.data_files import ALL_DB_FILES, DATA_CONFIG_FILES
 
@@ -197,6 +209,17 @@ if app is not None:
         momentum_volume_volume_ma_period: int = Field(default=20, ge=2, le=260)
         momentum_volume_volume_multiplier: float = Field(default=2.0, ge=0.1, le=20)
         momentum_volume_volume_lookback: int = Field(default=3, ge=1, le=30)
+        initial_rise_max_5d_gain_pct: float = Field(default=8.0, ge=-100, le=300)
+        initial_rise_max_10d_gain_pct: float = Field(default=15.0, ge=-100, le=300)
+        initial_rise_min_today_gain_pct: float = Field(default=2.0, ge=-100, le=100)
+        initial_rise_max_today_gain_pct: float = Field(default=7.0, ge=-100, le=300)
+        initial_rise_volume_ma_period: int = Field(default=20, ge=2, le=260)
+        initial_rise_min_volume_ratio: float = Field(default=1.3, ge=0.1, le=20)
+        initial_rise_quiet_volume_days: int = Field(default=3, ge=1, le=30)
+        initial_rise_consolidation_days: int = Field(default=20, ge=5, le=260)
+        initial_rise_max_range_width_pct: float = Field(default=15.0, ge=0.1, le=200)
+        initial_rise_breakout_days: int = Field(default=10, ge=2, le=260)
+        initial_rise_min_close_position: float = Field(default=0.7, ge=0, le=1)
 
         def to_scan_request(self) -> BacktestScanRequest:
             today = date.today()
@@ -254,6 +277,17 @@ if app is not None:
                 momentum_volume_volume_ma_period=self.momentum_volume_volume_ma_period,
                 momentum_volume_volume_multiplier=self.momentum_volume_volume_multiplier,
                 momentum_volume_volume_lookback=self.momentum_volume_volume_lookback,
+                initial_rise_max_5d_gain_pct=self.initial_rise_max_5d_gain_pct,
+                initial_rise_max_10d_gain_pct=self.initial_rise_max_10d_gain_pct,
+                initial_rise_min_today_gain_pct=self.initial_rise_min_today_gain_pct,
+                initial_rise_max_today_gain_pct=self.initial_rise_max_today_gain_pct,
+                initial_rise_volume_ma_period=self.initial_rise_volume_ma_period,
+                initial_rise_min_volume_ratio=self.initial_rise_min_volume_ratio,
+                initial_rise_quiet_volume_days=self.initial_rise_quiet_volume_days,
+                initial_rise_consolidation_days=self.initial_rise_consolidation_days,
+                initial_rise_max_range_width_pct=self.initial_rise_max_range_width_pct,
+                initial_rise_breakout_days=self.initial_rise_breakout_days,
+                initial_rise_min_close_position=self.initial_rise_min_close_position,
             )
 
     class NewsStartRequest(BaseModel):
@@ -354,6 +388,61 @@ if app is not None:
     def stock_status() -> dict[str, object]:
         return get_stock_db_status()
 
+    @app.get("/api/sectors/coverage")
+    def sector_coverage() -> dict[str, object]:
+        return get_electronics_coverage()
+
+    @app.get("/api/rotation/coverage")
+    def rotation_coverage() -> dict[str, object]:
+        return get_fine_coverage()
+
+    @app.get("/api/rotation/filters")
+    def rotation_filters() -> list[dict]:
+        return get_rotation_filters()
+
+    @app.get("/api/rotation/ranking")
+    def rotation_ranking(date: str | None = None, level: int = Query(default=3, ge=1, le=3),
+                         l1: str | None = None, l2: str | None = None,
+                         include_small: bool = False) -> list[dict]:
+        return get_rotation_ranking(trade_date=date, level=level, l1=l1, l2=l2, include_small=include_small)
+
+    @app.get("/api/rotation/stock/{stock_id}/classification")
+    def rotation_stock_classification(stock_id: str) -> dict:
+        result=get_stock_classification(stock_id)
+        if result is None:
+            raise HTTPException(status_code=404, detail="Target stock not found")
+        return result
+
+    @app.get("/api/rotation/detail/{sector_key:path}")
+    def rotation_detail(sector_key: str, date: str | None = None) -> dict:
+        result = get_rotation_detail(sector_key, trade_date=date)
+        if result["sector"] is None:
+            raise HTTPException(status_code=404, detail="Sector not found")
+        return result
+
+    @app.get("/api/sectors/ranking")
+    def sector_ranking(date: str | None = None, window_days: int = Query(default=1, ge=1, le=5)) -> list[dict]:
+        if window_days not in (1, 3, 5):
+            raise HTTPException(status_code=422, detail="window_days must be 1, 3, or 5")
+        return get_sector_ranking(trade_date=date, window_days=window_days)
+
+    @app.get("/api/sectors")
+    def sectors() -> list[dict]:
+        return list_sectors()
+
+    @app.get("/api/themes")
+    def themes() -> list[dict]:
+        return list_themes()
+
+    @app.get("/api/sectors/{slug}/stocks")
+    def sector_stocks(slug: str) -> list[dict]:
+        return list_electronics(category_slug=slug)
+
+    @app.get("/api/sectors/{slug}")
+    def sector_detail(slug: str) -> dict:
+        sector = next((row for row in list_sectors() if row["slug"] == slug), None)
+        return {"sector": sector, "stocks": list_electronics(category_slug=slug) if sector else []}
+
     @app.get("/api/price-cache/status")
     def price_cache_status() -> dict[str, object]:
         return get_price_cache_overview()
@@ -407,6 +496,10 @@ if app is not None:
             return {"ok": False, "error": "Job not found"}
         return {"ok": True, "job": _json_safe_response(job)}
 
+    @app.get("/api/stocks/search")
+    def stock_search(q: str = Query(default="", max_length=40), limit: int = Query(default=50, ge=1, le=50)) -> dict[str, object]:
+        return {"query": q, "rows": search_securities(q, limit)}
+
     @app.get("/api/stocks/{stock_id}")
     def stock_detail(stock_id: str) -> dict[str, object]:
         return build_stock_overview(stock_id)
@@ -414,6 +507,13 @@ if app is not None:
     @app.get("/api/stocks/{stock_id}/overview")
     def stock_overview(stock_id: str) -> dict[str, object]:
         return build_stock_overview(stock_id)
+
+    @app.get("/api/stocks/{stock_id}/financial-trends")
+    def stock_financial_trends(stock_id: str) -> dict[str, object]:
+        security = find_security(stock_id)
+        if not security:
+            return {"quarters": [], "pe_history": [], "source_error": "查無股票"}
+        return get_stock_financial_trends(security["code"], security["market"])
 
     @app.get("/api/watchlists")
     def watchlists(group_id: int | None = Query(default=None, ge=1)) -> dict[str, object]:
@@ -498,6 +598,26 @@ if app is not None:
     ) -> dict[str, object]:
         return list_active_etf_snapshots(limit=limit, days=days)
 
+    @app.post("/api/etf/active/refresh")
+    def refresh_active_etf() -> dict[str, object]:
+        job_id = data_jobs.start_job(
+            "active_etf_refresh", date.today().isoformat(), refresh_latest_active_etf_snapshots,
+            pending_message="主動 ETF 資料更新排隊中",
+            running_message="正在取得最新主動 ETF 持股異動",
+            completed_message=lambda result=None, error=None: (
+                f"主動 ETF 更新完成：{result.get('count', 0)} 檔"
+                if isinstance(result, dict) else "主動 ETF 更新完成"
+            ),
+            failed_message="主動 ETF 更新失敗",
+        )
+        return {"ok": True, "job_id": job_id}
+
+    @app.get("/api/etf/active/refresh/jobs/{job_id}")
+    def active_etf_refresh_job(job_id: str) -> dict[str, object]:
+        job = data_jobs.get_job(job_id, include_result=True)
+        return {"ok": bool(job), "job": _json_safe_response(job),
+                "error": None if job else "Job not found"}
+
     @app.get("/api/etf/active/{etf_code}/changes")
     def active_etf_changes(
         etf_code: str,
@@ -512,6 +632,8 @@ if app is not None:
 
     @app.post("/api/backtest/jobs")
     def start_backtest_job(request_body: BacktestStartRequest) -> dict[str, object]:
+        if os.getenv("TRADE_ENABLE_BACKTEST", "1").strip().lower() in {"0", "false", "no"}:
+            raise HTTPException(status_code=503, detail="Backtesting is disabled on this NAS")
         request = request_body.to_scan_request()
         validation_error = validate_backtest_request(request)
         if validation_error:
@@ -587,3 +709,46 @@ if app is not None:
     @app.get("/api/dashboard/overview")
     def dashboard_overview() -> dict[str, object]:
         return build_dashboard_overview_payload()
+
+    @app.get("/api/dashboard")
+    def market_dashboard(refresh: bool = Query(default=False)) -> dict[str, object]:
+        # The expensive breadth calculation is shared for five minutes.
+        if refresh:
+            _cached_market_dashboard.cache_clear()
+        return _cached_market_dashboard(int(datetime.now().timestamp() // 300))
+
+    @app.get("/api/chips/market/margin-short")
+    def market_margin_short(market: str = Query(default="TWSE", pattern="^(TWSE|TPEx|combined)$"), days: int = Query(default=370, ge=7, le=730)) -> dict[str, object]:
+        return market_history(market, days)
+
+    @app.get("/api/chips/stocks/{stock_id}/margin-short")
+    def stock_margin_short(stock_id: str, days: int = Query(default=370, ge=0, le=7300)) -> dict[str, object]:
+        return stock_margin_history(stock_id, days)
+
+    @app.get("/api/chips/stocks/{stock_id}/ownership")
+    def stock_ownership(stock_id: str, days: int = Query(default=750, ge=30, le=1500)) -> dict[str, object]:
+        return ownership_history(stock_id, days)
+
+    @app.get("/api/events")
+    def company_events(
+        start_date: date = Query(default_factory=date.today),
+        end_date: date = Query(default_factory=lambda: date.today() + timedelta(days=14)),
+        event_type: str | None = Query(default=None),
+        stock_id: str | None = Query(default=None),
+        watchlist_only: bool = Query(default=False),
+        query: str | None = Query(default=None, max_length=80),
+        status: str | None = Query(default=None),
+        limit: int = Query(default=500, ge=1, le=500),
+        offset: int = Query(default=0, ge=0),
+    ) -> dict[str, object]:
+        if end_date < start_date or (end_date - start_date).days > 366:
+            raise HTTPException(status_code=422, detail="Invalid event date range")
+        try:
+            return list_events(start_date=start_date.isoformat(), end_date=end_date.isoformat(), event_type=event_type, stock_id=stock_id, watchlist_only=watchlist_only, query=query, status=status, limit=limit, offset=offset)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@lru_cache(maxsize=2)
+def _cached_market_dashboard(bucket: int) -> dict[str, object]:
+    return build_dashboard()

@@ -24,10 +24,11 @@ import {
   Wrench
 } from "lucide-react";
 import type { ReactNode } from "react";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import {
   fetchActiveEtfChanges,
+  fetchActiveEtfRefreshJob,
   fetchActiveEtfSnapshots,
   addWatchlistItem,
   createWatchlistGroup,
@@ -40,6 +41,8 @@ import {
   fetchMarketMapGroups,
   fetchMarketMapMembers,
   fetchMarketMapTopics,
+  fetchStockMargin,
+  fetchStockSuggestions,
   fetchNewsJob,
   fetchPriceCacheOverview,
   fetchPriceCacheJob,
@@ -51,14 +54,22 @@ import {
   removeWatchlistItem,
   fetchUsMarketCalendar,
   startNewsJob,
+  startActiveEtfRefresh,
   startBacktestJob,
   startBootstrapJobs,
   startPriceCacheJob,
   updateStockPriceCache
 } from "./api";
 import { CandlestickVolumeChart } from "./components/CandlestickVolumeChart";
+import { SectorRotationView } from "./components/SectorRotationView";
+import { MarketDashboard } from "./components/MarketDashboard";
+import { CompanyCalendar } from "./components/CompanyCalendar";
+import { StockOwnershipTrends } from "./components/ChipTrends";
+import { FinancialTrends } from "./components/FinancialTrends";
+import type { MarginHistory, StockSuggestion } from "./api";
 import type {
   ActiveEtfChanges,
+  ActiveEtfRefreshJob,
   ActiveEtfSnapshot,
   ActiveEtfSnapshots,
   BacktestConfig,
@@ -84,7 +95,7 @@ import type {
 } from "./types";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
-type ViewKey = "overview" | "stock" | "favorites" | "strong" | "data" | "market" | "broker" | "revenue" | "usCalendar" | "etf" | "backtest" | "news" | "research" | "system";
+type ViewKey = "overview" | "stock" | "events" | "favorites" | "strong" | "data" | "market" | "rotation" | "broker" | "revenue" | "usCalendar" | "etf" | "backtest" | "news" | "research" | "system";
 type StockNavigation = {
   sourceLabel: string;
   codes: string[];
@@ -95,6 +106,12 @@ type StockNavigationState = {
   total: number;
   previousCode: string | null;
   nextCode: string | null;
+};
+type ViewHistoryEntry = {
+  view: ViewKey;
+  scrollY: number;
+  stockInput: string;
+  stockNavigation: StockNavigation | null;
 };
 type BacktestTuningParams = {
   range_lookback_days: number;
@@ -141,6 +158,17 @@ type BacktestTuningParams = {
   momentum_volume_volume_ma_period: number;
   momentum_volume_volume_multiplier: number;
   momentum_volume_volume_lookback: number;
+  initial_rise_max_5d_gain_pct: number;
+  initial_rise_max_10d_gain_pct: number;
+  initial_rise_min_today_gain_pct: number;
+  initial_rise_max_today_gain_pct: number;
+  initial_rise_volume_ma_period: number;
+  initial_rise_min_volume_ratio: number;
+  initial_rise_quiet_volume_days: number;
+  initial_rise_consolidation_days: number;
+  initial_rise_max_range_width_pct: number;
+  initial_rise_breakout_days: number;
+  initial_rise_min_close_position: number;
 };
 
 const defaultBacktestParams: BacktestTuningParams = {
@@ -187,16 +215,29 @@ const defaultBacktestParams: BacktestTuningParams = {
   momentum_volume_ma_slope_lookback: 3,
   momentum_volume_volume_ma_period: 20,
   momentum_volume_volume_multiplier: 2,
-  momentum_volume_volume_lookback: 3
+  momentum_volume_volume_lookback: 3,
+  initial_rise_max_5d_gain_pct: 8,
+  initial_rise_max_10d_gain_pct: 15,
+  initial_rise_min_today_gain_pct: 2,
+  initial_rise_max_today_gain_pct: 7,
+  initial_rise_volume_ma_period: 20,
+  initial_rise_min_volume_ratio: 1.3,
+  initial_rise_quiet_volume_days: 3,
+  initial_rise_consolidation_days: 20,
+  initial_rise_max_range_width_pct: 15,
+  initial_rise_breakout_days: 10,
+  initial_rise_min_close_position: 0.7
 };
 
 const navItems: { key: ViewKey; label: string; icon: ReactNode }[] = [
   { key: "overview", label: "總覽", icon: <Activity size={20} /> },
   { key: "stock", label: "個股", icon: <Search size={20} /> },
+  { key: "events", label: "法說財報", icon: <CalendarClock size={20} /> },
   { key: "favorites", label: "最愛", icon: <Star size={20} /> },
   { key: "strong", label: "強勢", icon: <TrendingUp size={20} /> },
   { key: "data", label: "資料", icon: <Database size={20} /> },
   { key: "market", label: "產業", icon: <Layers3 size={20} /> },
+  { key: "rotation", label: "輪動", icon: <BarChart3 size={20} /> },
   { key: "broker", label: "分點", icon: <BriefcaseBusiness size={20} /> },
   { key: "revenue", label: "營收", icon: <TrendingUp size={20} /> },
   { key: "usCalendar", label: "美股", icon: <CalendarClock size={20} /> },
@@ -217,6 +258,13 @@ const defaultUsCalendarEnd = formatInputDate(addDays(new Date(), 30));
 
 export function App() {
   const [activeView, setActiveView] = useState<ViewKey>("overview");
+  const [dashboardSector, setDashboardSector] = useState("");
+  const [dashboardRefresh, setDashboardRefresh] = useState(0);
+  const [eventRefresh, setEventRefresh] = useState(0);
+  const [stockChipRefresh, setStockChipRefresh] = useState(0);
+  const [viewHistory, setViewHistory] = useState<ViewHistoryEntry[]>([]);
+  const [rotationVisited, setRotationVisited] = useState(false);
+  const pendingScrollY = useRef<number | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("idle");
   const [overview, setOverview] = useState<DashboardOverview | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
@@ -262,6 +310,8 @@ export function App() {
   const [selectedEtfCode, setSelectedEtfCode] = useState("");
   const [selectedEtfSnapshotDate, setSelectedEtfSnapshotDate] = useState("");
   const [activeEtfChanges, setActiveEtfChanges] = useState<ActiveEtfChanges | null>(null);
+  const [activeEtfRefreshJob, setActiveEtfRefreshJob] = useState<ActiveEtfRefreshJob | null>(null);
+  const [activeEtfRefreshStarting, setActiveEtfRefreshStarting] = useState(false);
   const [backtestConfig, setBacktestConfig] = useState<BacktestConfig | null>(null);
   const [backtestJob, setBacktestJob] = useState<BacktestJob | null>(null);
   const [backtestStarting, setBacktestStarting] = useState(false);
@@ -278,6 +328,45 @@ export function App() {
   const [researchCompanies, setResearchCompanies] = useState<ResearchCompanies | null>(null);
   const [featureError, setFeatureError] = useState("");
   const [stockError, setStockError] = useState("");
+
+  function navigateToView(nextView: ViewKey) {
+    if (nextView === activeView) return;
+    setViewHistory((history) => [...history, {
+      view: activeView,
+      scrollY: window.scrollY,
+      stockInput,
+      stockNavigation
+    }]);
+    if (nextView === "rotation") setRotationVisited(true);
+    if (nextView === "etf") void loadActiveEtfData();
+    if (nextView === "usCalendar") {
+      const now = new Date();
+      void loadUsMarketCalendar(formatInputDate(now), formatInputDate(addDays(now, 30)), usCalendarImportance);
+    }
+    pendingScrollY.current = 0;
+    setActiveView(nextView);
+  }
+
+  function goToPreviousView() {
+    const previous = viewHistory.at(-1);
+    if (!previous) return;
+    setViewHistory((history) => history.slice(0, -1));
+    setStockInput(previous.stockInput);
+    setStockNavigation(previous.stockNavigation);
+    if (previous.view === "stock" && previous.stockInput !== stockInput) {
+      void loadStock(previous.stockInput);
+    }
+    pendingScrollY.current = previous.scrollY;
+    setActiveView(previous.view);
+  }
+
+  useLayoutEffect(() => {
+    const scrollY = pendingScrollY.current;
+    if (scrollY === null) return;
+    pendingScrollY.current = null;
+    const frame = window.requestAnimationFrame(() => window.scrollTo(0, scrollY));
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeView]);
 
   async function loadOverview() {
     setLoadState("loading");
@@ -380,7 +469,7 @@ export function App() {
     if (navigation !== undefined) {
       setStockNavigation(navigation);
     }
-    setActiveView("stock");
+    navigateToView("stock");
     void loadStock(normalized);
   }
 
@@ -524,6 +613,37 @@ export function App() {
     }
   }
 
+  async function loadActiveEtfData() {
+    try {
+      const nextEtfs = await fetchActiveEtfSnapshots(500, 30);
+      setActiveEtfSnapshots(nextEtfs);
+      const nextEtfCode = selectedEtfCode && nextEtfs.rows.some(row => row.etf_code === selectedEtfCode)
+        ? selectedEtfCode : nextEtfs.rows[0]?.etf_code || "";
+      const nextEtfDates = nextEtfs.rows.filter(row => row.etf_code === nextEtfCode);
+      const nextEtfSnapshotDate = nextEtfDates[0]?.snapshot_date || "";
+      setSelectedEtfCode(nextEtfCode);
+      setSelectedEtfSnapshotDate(nextEtfSnapshotDate);
+      setActiveEtfChanges(nextEtfCode ? await fetchActiveEtfChanges(nextEtfCode, nextEtfSnapshotDate) : null);
+    } catch (error) {
+      setFeatureError(error instanceof Error ? error.message : "ETF 資料讀取失敗");
+    }
+  }
+
+  async function handleActiveEtfRefresh() {
+    setActiveEtfRefreshStarting(true);
+    setFeatureError("");
+    try {
+      const started = await startActiveEtfRefresh();
+      if (!started.ok || !started.job_id) throw new Error(started.error || "ETF 更新啟動失敗");
+      const response = await fetchActiveEtfRefreshJob(started.job_id);
+      if (response.job) setActiveEtfRefreshJob(response.job);
+    } catch (error) {
+      setFeatureError(error instanceof Error ? error.message : "ETF 更新啟動失敗");
+    } finally {
+      setActiveEtfRefreshStarting(false);
+    }
+  }
+
   async function handleGroupSelect(groupName: string) {
     setSelectedGroup(groupName);
     const nextTopics = await fetchMarketMapTopics(groupName);
@@ -615,11 +735,21 @@ export function App() {
   useEffect(() => {
     if (!backtestJob || !["queued", "running"].includes(backtestJob.status)) return;
     const timer = window.setInterval(async () => {
-      const nextJob = await fetchBacktestJob(backtestJob.job_id);
-      if (nextJob.job) {
-        setBacktestJob(nextJob.job);
-      } else if (!nextJob.ok) {
-        setBacktestJob({ ...backtestJob, status: "failed", progress: 1, message: nextJob.error ?? "任務狀態已失效", error: nextJob.error ?? null });
+      try {
+        const nextJob = await fetchBacktestJob(backtestJob.job_id);
+        if (nextJob.job) {
+          setBacktestJob(nextJob.job);
+        } else if (!nextJob.ok) {
+          setBacktestJob({ ...backtestJob, status: "failed", progress: 1, message: nextJob.error ?? "任務狀態已失效", error: nextJob.error ?? null });
+        }
+      } catch (error) {
+        setBacktestJob({
+          ...backtestJob,
+          status: "failed",
+          progress: 1,
+          message: "選股連線中斷，請重新按開始",
+          error: error instanceof Error ? error.message : "Backtest polling failed"
+        });
       }
     }, 1500);
     return () => window.clearInterval(timer);
@@ -637,6 +767,24 @@ export function App() {
     }, 1800);
     return () => window.clearInterval(timer);
   }, [newsJob]);
+
+  useEffect(() => {
+    if (!activeEtfRefreshJob || !["queued", "running"].includes(activeEtfRefreshJob.status)) return;
+    const timer = window.setInterval(async () => {
+      try {
+        const response = await fetchActiveEtfRefreshJob(activeEtfRefreshJob.job_id);
+        if (response.job) {
+          setActiveEtfRefreshJob(response.job);
+          if (response.job.status === "completed") void loadActiveEtfData();
+        } else if (!response.ok) {
+          setActiveEtfRefreshJob({ ...activeEtfRefreshJob, status: "failed", error: response.error || "任務狀態已失效" });
+        }
+      } catch (error) {
+        setActiveEtfRefreshJob({ ...activeEtfRefreshJob, status: "failed", error: error instanceof Error ? error.message : "連線中斷" });
+      }
+    }, 1500);
+    return () => window.clearInterval(timer);
+  }, [activeEtfRefreshJob]);
 
   useEffect(() => {
     if (!priceJob || !["queued", "running"].includes(priceJob.status)) return;
@@ -679,10 +827,10 @@ export function App() {
             <button
               className={`nav-item ${activeView === item.key ? "active" : ""}`}
               type="button"
-              aria-label={item.label}
-              title={item.label}
+              aria-label={viewTitle(item.key)}
+              data-tooltip={viewTitle(item.key)}
               key={item.key}
-              onClick={() => setActiveView(item.key)}
+              onClick={() => navigateToView(item.key)}
             >
               {item.icon}
             </button>
@@ -692,16 +840,28 @@ export function App() {
 
       <section className={`workspace ${activeView === "stock" ? "compact-workspace" : ""}`}>
         <header className="top-bar">
-          <div>
-            <p className="eyebrow">Trade Lab Web</p>
-            <h1>{viewTitle(activeView)}</h1>
+          <div className="top-bar-heading">
+            <button
+              className="back-button"
+              type="button"
+              onClick={goToPreviousView}
+              disabled={viewHistory.length === 0}
+              title={viewHistory.length ? `返回${viewTitle(viewHistory[viewHistory.length - 1].view)}` : "沒有上一頁"}
+            >
+              <ChevronLeft size={18} />
+              上一頁
+            </button>
+            <div>
+              <p className="eyebrow">Trade Lab Web</p>
+              <h1>{viewTitle(activeView)}</h1>
+            </div>
           </div>
-          <button className="icon-button" type="button" onClick={() => void loadOverview()} aria-label="Reload API status">
+          <button className="icon-button" type="button" onClick={() => { if (activeView === "overview") setDashboardRefresh(value => value + 1); else if (activeView === "events") setEventRefresh(value => value + 1); else if (activeView === "stock") { setStockChipRefresh(value => value + 1); void loadStock(stockInput); } else void loadOverview(); }} aria-label="重新整理目前頁面">
             <RefreshCw size={18} />
           </button>
         </header>
 
-        {loadState === "error" ? (
+        {loadState === "error" && activeView !== "overview" ? (
           <section className="alert-panel">
             <strong>API 尚未連上</strong>
             <span>{errorMessage}</span>
@@ -716,19 +876,14 @@ export function App() {
         ) : null}
 
         {activeView === "overview" ? (
-          <OverviewView
-            loadState={loadState}
-            overview={overview}
-            fileSummary={fileSummary}
-            stockStatusText={stockStatus ? `${stockStatus.count.toLocaleString()} 檔` : "-"}
-            stockStatusMeta={stockStatus?.last_sync_at ?? sections?.stocks.error ?? "not loaded"}
-            marketMapCount={marketMap?.topic_count ?? "-"}
-            brokerCount={broker?.branch_count ?? "-"}
-          />
+          <MarketDashboard key={dashboardRefresh} refresh={dashboardRefresh > 0} onStockSelect={(code, sourceLabel, codes) => openStockDetail(code, { sourceLabel, codes: uniqueCodes(codes) })} onIndustrySelect={(key) => { setDashboardSector(key); navigateToView("rotation"); }} />
         ) : null}
+
+        {activeView === "events" ? <CompanyCalendar key={eventRefresh} onStockSelect={(code, codes) => openStockDetail(code, { sourceLabel: "法說財報", codes })} /> : null}
 
         {activeView === "stock" ? (
           <StockView
+            chipRefresh={stockChipRefresh}
             stockInput={stockInput}
             stockLoading={stockLoading}
             stockUpdating={stockUpdating}
@@ -745,6 +900,7 @@ export function App() {
             onFavoriteGroupChange={setFavoriteGroupId}
             onAddFavorite={handleAddFavorite}
             onNavigateStock={(code) => openStockDetail(code)}
+            onChooseStock={(code) => openStockDetail(code, null)}
           />
         ) : null}
 
@@ -812,11 +968,15 @@ export function App() {
             onGroupSelect={handleGroupSelect}
             onTopicSelect={handleTopicSelect}
             onMemberSelect={(code) => {
-              setStockInput(code);
-              setActiveView("stock");
-              void loadStock(code);
+              openStockDetail(code);
             }}
           />
+        ) : null}
+
+        {rotationVisited ? (
+          <div hidden={activeView !== "rotation"}>
+            <SectorRotationView active={activeView === "rotation"} onStockSelect={(code) => openStockDetail(code)} focusedSector={dashboardSector} />
+          </div>
         ) : null}
 
         {activeView === "broker" ? (
@@ -833,9 +993,7 @@ export function App() {
           <RevenueView
             revenueMomentum={revenueMomentum}
             onStockSelect={(code) => {
-              setStockInput(code);
-              setActiveView("stock");
-              void loadStock(code);
+              openStockDetail(code);
             }}
           />
         ) : null}
@@ -857,11 +1015,12 @@ export function App() {
             changes={activeEtfChanges}
             selectedEtfCode={selectedEtfCode}
             selectedEtfSnapshotDate={selectedEtfSnapshotDate}
+            refreshJob={activeEtfRefreshJob}
+            refreshStarting={activeEtfRefreshStarting}
+            onRefresh={() => void handleActiveEtfRefresh()}
             onEtfSelect={handleEtfSelect}
             onStockSelect={(code) => {
-              setStockInput(code);
-              setActiveView("stock");
-              void loadStock(code);
+              openStockDetail(code);
             }}
           />
         ) : null}
@@ -1101,6 +1260,7 @@ function WatchlistView({
 }
 
 function StockView({
+  chipRefresh,
   stockInput,
   stockLoading,
   stockUpdating,
@@ -1116,8 +1276,10 @@ function StockView({
   onPriceUpdate,
   onFavoriteGroupChange,
   onAddFavorite,
-  onNavigateStock
+  onNavigateStock,
+  onChooseStock
 }: {
+  chipRefresh: number;
   stockInput: string;
   stockLoading: boolean;
   stockUpdating: boolean;
@@ -1134,45 +1296,116 @@ function StockView({
   onFavoriteGroupChange: (groupId: number | null) => void;
   onAddFavorite: (code: string) => Promise<void>;
   onNavigateStock: (code: string) => void;
+  onChooseStock: (code: string) => void;
 }) {
   const stockCode = stockOverview?.security?.code || stockInput;
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [suggestions, setSuggestions] = useState<StockSuggestion[]>([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const [activeSuggestion, setActiveSuggestion] = useState(-1);
+  useEffect(() => {
+    const query = stockInput.trim();
+    if (!searchOpen || !query) { setSuggestions([]); setSuggestionsLoading(false); return; }
+    let live = true;
+    const timer = window.setTimeout(() => {
+      setSuggestionsLoading(true);
+      fetchStockSuggestions(query)
+        .then(result => { if (live) { setSuggestions(result.rows); setActiveSuggestion(-1); } })
+        .catch(() => { if (live) setSuggestions([]); })
+        .finally(() => { if (live) setSuggestionsLoading(false); });
+    }, 160);
+    return () => { live = false; window.clearTimeout(timer); };
+  }, [stockInput, searchOpen]);
+  useEffect(() => {
+    if (searchOpen && activeSuggestion >= 0) document.getElementById(`stock-search-option-${activeSuggestion}`)?.scrollIntoView({ block: "nearest" });
+  }, [searchOpen, activeSuggestion]);
+  const chooseSuggestion = (suggestion: StockSuggestion) => {
+    setSearchOpen(false);
+    setSuggestions([]);
+    setActiveSuggestion(-1);
+    onChooseStock(suggestion.code);
+  };
+  const [stockMargin, setStockMargin] = useState<MarginHistory | null>(null);
+  useEffect(() => {
+    if (!stockOverview?.found || !/^\d{4}$/.test(stockCode)) { setStockMargin(null); return; }
+    let live = true;
+    setStockMargin(null);
+    fetchStockMargin(stockCode).then(value => { if (live) setStockMargin(value); }).catch(() => { if (live) setStockMargin(null); });
+    return () => { live = false; };
+  }, [stockCode, stockOverview?.found, chipRefresh]);
   return (
     <>
+      <section className="stock-panel stock-detail-panel stock-search-panel">
+        <div className="section-title">
+          <Search size={20} />
+          <h2>個股查詢</h2>
+        </div>
+        <form className="stock-search" onSubmit={(event) => { setSearchOpen(false); onStockSubmit(event); }} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setSearchOpen(false); }}>
+          <div className="stock-search-combobox">
+            <input
+              value={stockInput}
+              onChange={(event) => { onStockInputChange(event.target.value); setSuggestions([]); setSuggestionsLoading(!!event.target.value.trim()); setActiveSuggestion(-1); setSearchOpen(true); }}
+              onFocus={() => { setSearchOpen(true); if (stockInput.trim()) setSuggestionsLoading(true); }}
+              onKeyDown={(event) => {
+                if (event.nativeEvent.isComposing) return;
+                if (event.key === "Escape") { setSearchOpen(false); setActiveSuggestion(-1); return; }
+                if (!searchOpen || !suggestions.length) return;
+                if (event.key === "ArrowDown") { event.preventDefault(); setActiveSuggestion(index => Math.min(index + 1, suggestions.length - 1)); }
+                if (event.key === "ArrowUp") { event.preventDefault(); setActiveSuggestion(index => Math.max(index - 1, 0)); }
+                if (event.key === "Enter" && activeSuggestion >= 0) { event.preventDefault(); chooseSuggestion(suggestions[activeSuggestion]); }
+              }}
+              placeholder="輸入代號或名稱，例如 2330 / 台積電"
+              aria-label="Stock code"
+              role="combobox"
+              aria-autocomplete="list"
+              aria-expanded={searchOpen && !!stockInput.trim()}
+              aria-controls="stock-search-suggestions"
+              aria-activedescendant={activeSuggestion >= 0 ? `stock-search-option-${activeSuggestion}` : undefined}
+              autoComplete="off"
+            />
+            {searchOpen && !!stockInput.trim() && <div id="stock-search-suggestions" className="stock-search-suggestions" role="listbox" aria-label="股票搜尋建議">
+              {suggestionsLoading ? <div className="stock-search-hint">搜尋中…</div> : suggestions.length ? suggestions.map((suggestion, index) => <button key={`${suggestion.code}-${suggestion.market}`} id={`stock-search-option-${index}`} type="button" role="option" aria-selected={activeSuggestion === index} className={activeSuggestion === index ? "active" : ""} onMouseDown={(event) => event.preventDefault()} onClick={() => chooseSuggestion(suggestion)}><span><strong>{suggestion.name_zh}</strong><small>{suggestion.market === "TWSE" ? "上市" : "上櫃"}</small></span><b>{suggestion.code}</b></button>) : <div className="stock-search-hint">沒有符合的股票，仍可按查詢搜尋完整名稱。</div>}
+            </div>}
+          </div>
+          <button type="submit">{stockLoading ? "查詢中" : "查詢"}</button>
+          <button type="button" onClick={() => void onPriceUpdate()} disabled={stockUpdating || stockLoading}>
+            {stockUpdating ? "更新中" : "更新價格"}
+          </button>
+        </form>
+        {stockError ? <p className="inline-error">{stockError}</p> : null}
+      </section>
+
+      <section className="broker-panel stock-detail-panel stock-chart-first">
+        <div className="section-title">
+          <Activity size={20} />
+          <h2>{stockOverview?.security?.name_zh ? `${stockCode} ${stockOverview.security.name_zh} · ` : ""}K 線與成交量</h2>
+        </div>
+        {navigation ? (
+          <div className="stock-list-navigation stock-chart-navigation">
+            <span>{navigation.sourceLabel}</span>
+            <strong>{navigation.currentIndex + 1} / {navigation.total}</strong>
+            <div>
+              <button type="button" onClick={() => navigation.previousCode && onNavigateStock(navigation.previousCode)} disabled={!navigation.previousCode || stockLoading}>
+                <ChevronLeft size={16} />上一檔
+              </button>
+              <button type="button" onClick={() => navigation.nextCode && onNavigateStock(navigation.nextCode)} disabled={!navigation.nextCode || stockLoading}>
+                下一檔<ChevronRight size={16} />
+              </button>
+            </div>
+          </div>
+        ) : null}
+        <CandlestickVolumeChart quotes={stockQuotes} margin={stockMargin?.rows || []} latestQuoteIsCurrent={stockOverview?.latest_quote?.is_current !== false} />
+        {stockOverview?.latest_quote?.is_current === false && <p className="chart-unit-note">最近交易日 {stockOverview.market_trade_date || "—"} 未有此股成交資料；K 線停留在最後實際成交日 {stockOverview.latest_quote.trade_date}，不顯示當日漲跌幅。</p>}
+      </section>
+
+      {stockOverview?.found ? <StockOwnershipTrends key={`${stockCode}-${chipRefresh}`} stockId={stockCode} /> : null}
+
       <section className="stock-top-grid">
         <article className="stock-panel stock-query-panel">
           <div className="section-title">
-            <Search size={20} />
-            <h2>股票主檔查詢</h2>
+            <Database size={20} />
+            <h2>基本資料</h2>
           </div>
-          <form className="stock-search" onSubmit={onStockSubmit}>
-            <input
-              value={stockInput}
-              onChange={(event) => onStockInputChange(event.target.value)}
-              placeholder="輸入代號或名稱，例如 2330 / 台積電"
-              aria-label="Stock code"
-            />
-            <button type="submit">{stockLoading ? "查詢中" : "查詢"}</button>
-            <button type="button" onClick={() => void onPriceUpdate()} disabled={stockUpdating || stockLoading}>
-              {stockUpdating ? "更新中" : "更新價格"}
-            </button>
-          </form>
-          {navigation ? (
-            <div className="stock-list-navigation">
-              <span>{navigation.sourceLabel}</span>
-              <strong>{navigation.currentIndex + 1} / {navigation.total}</strong>
-              <div>
-                <button type="button" onClick={() => navigation.previousCode && onNavigateStock(navigation.previousCode)} disabled={!navigation.previousCode || stockLoading}>
-                  <ChevronLeft size={16} />
-                  上一檔
-                </button>
-                <button type="button" onClick={() => navigation.nextCode && onNavigateStock(navigation.nextCode)} disabled={!navigation.nextCode || stockLoading}>
-                  下一檔
-                  <ChevronRight size={16} />
-                </button>
-              </div>
-            </div>
-          ) : null}
-          {stockError ? <p className="inline-error">{stockError}</p> : null}
           {stockOverview?.found ? (
             <FavoriteControl
               stockCode={stockCode}
@@ -1185,20 +1418,16 @@ function StockView({
           ) : null}
           <StockIdentity stockOverview={stockOverview} />
         </article>
+        {stockOverview?.found ? <StockClassificationPanel stockOverview={stockOverview} /> : null}
       </section>
 
-      <section className="broker-panel stock-detail-panel">
-        <div className="section-title">
-          <Activity size={20} />
-          <h2>K 線與成交量</h2>
-        </div>
-        <CandlestickVolumeChart quotes={stockQuotes} />
-      </section>
+      {stockOverview?.found ? <FinancialTrends stockId={stockCode} /> : null}
 
       <section className="broker-panel stock-detail-panel">
         <div className="section-title">
           <BriefcaseBusiness size={20} />
           <h2>券商分點摘要</h2>
+          {stockOverview?.broker_summary?.trade_date ? <span className="broker-report-date">資料日期 {stockOverview.broker_summary.trade_date}</span> : null}
         </div>
         {stockOverview?.broker_summary ? (
           <div className="broker-grid">
@@ -1216,7 +1445,7 @@ function StockView({
           <h2>三大法人買賣超</h2>
         </div>
         {(stockOverview?.institutional_trading ?? []).length ? (
-          <InstitutionalTradingTable rows={stockOverview?.institutional_trading ?? []} />
+          <InstitutionalTradingTable key={stockCode} rows={stockOverview?.institutional_trading ?? []} />
         ) : (
           <p className="muted">目前本地 chip_cache.db 沒有這檔股票的三大法人買賣資料。</p>
         )}
@@ -1244,7 +1473,7 @@ function StockView({
             <MiniDataCard label="價格列數" value={stockOverview.price_cache?.row_count ?? 0} />
             <MiniDataCard label="快取狀態" value={stockOverview.price_cache?.fetch_status ?? "-"} />
             <MiniDataCard label="最後收盤" value={formatPrice(stockOverview.latest_quote?.close)} />
-            <MiniDataCard label="漲跌幅" value={formatChangePct(stockOverview.latest_quote?.change_pct)} />
+            <MiniDataCard label={stockOverview.latest_quote?.is_current === false ? "當日漲跌幅（無成交）" : "漲跌幅"} value={formatChangePct(stockOverview.latest_quote?.change_pct)} tone={toneClass(stockOverview.latest_quote?.change_pct)} />
             <MiniDataCard label="分點日期" value={stockOverview.broker_summary?.trade_date ?? "尚無本地匯入"} />
           </div>
         ) : (
@@ -1314,6 +1543,7 @@ function MonthlyRevenueTable({ rows }: { rows: StockOverview["monthly_revenue"] 
           </div>
         ))}
       </div>
+      <p className="chart-unit-note">來源：MOPS 月營收公開資料。月份代表營收月份；最新月資料可能仍在分批公告，未公告的公司不以 0 補值。此處月營收與季度財務報告不同。</p>
     </div>
   );
 }
@@ -1322,13 +1552,18 @@ function RevenueBarChart({ rows }: { rows: StockOverview["monthly_revenue"] }) {
   const values = rows.map((row) => Number(row.current_revenue ?? 0));
   const maxValue = Math.max(...values, 1);
   return (
-    <div className="stock-revenue-bars" aria-label="月營收柱狀圖">
+    <div className="stock-revenue-bars" role="group" aria-label="月營收柱狀圖">
       {rows.map((row) => {
         const value = Number(row.current_revenue ?? 0);
         const heightPct = Math.max(5, Math.round((value / maxValue) * 100));
         return (
-          <div className="stock-revenue-bar-item" key={`${row.market}-${row.code}-${row.report_month}-bar`}>
-            <span>{formatLargeAmount(row.current_revenue)}</span>
+          <div
+            className="stock-revenue-bar-item"
+            key={`${row.market}-${row.code}-${row.report_month}-bar`}
+            role="img"
+            aria-label={`${row.report_month} 月營收 ${formatLargeAmount(row.current_revenue)}`}
+            title={`${row.report_month}：${formatLargeAmount(row.current_revenue)}`}
+          >
             <div className="stock-revenue-bar-track">
               <div className={`stock-revenue-bar ${toneClass(row.yoy_pct)}`} style={{ height: `${heightPct}%` }} />
             </div>
@@ -1341,24 +1576,33 @@ function RevenueBarChart({ rows }: { rows: StockOverview["monthly_revenue"] }) {
 }
 
 function InstitutionalTradingTable({ rows }: { rows: StockOverview["institutional_trading"] }) {
+  const [expanded, setExpanded] = useState(false);
+  const visibleRows = expanded ? rows : rows.slice(0, 5);
   return (
-    <div className="institutional-table">
-      <div className="institutional-row institutional-header">
-        <span>日期</span>
-        <span>外資(張)</span>
-        <span>投信(張)</span>
-        <span>自營(張)</span>
-        <span>合計(張)</span>
-      </div>
-      {rows.map((row) => (
-        <div className="institutional-row" key={`${row.trade_date}-${row.market}-${row.code}`}>
-          <span>{row.trade_date}</span>
-          <strong className={toneClass(row.foreign_net)}>{formatLots(row.foreign_net)}</strong>
-          <strong className={toneClass(row.trust_net)}>{formatLots(row.trust_net)}</strong>
-          <strong className={toneClass(row.dealer_net)}>{formatLots(row.dealer_net)}</strong>
-          <strong className={toneClass(row.total_net)}>{formatLots(row.total_net)}</strong>
+    <div className="institutional-block">
+      <div className="institutional-table">
+        <div className="institutional-row institutional-header">
+          <span>日期</span>
+          <span>外資(張)</span>
+          <span>投信(張)</span>
+          <span>自營(張)</span>
+          <span>合計(張)</span>
         </div>
-      ))}
+        {visibleRows.map((row) => (
+          <div className="institutional-row" key={`${row.trade_date}-${row.market}-${row.code}`}>
+            <span>{row.trade_date}</span>
+            <strong className={toneClass(row.foreign_net)}>{formatLots(row.foreign_net)}</strong>
+            <strong className={toneClass(row.trust_net)}>{formatLots(row.trust_net)}</strong>
+            <strong className={toneClass(row.dealer_net)}>{formatLots(row.dealer_net)}</strong>
+            <strong className={toneClass(row.total_net)}>{formatLots(row.total_net)}</strong>
+          </div>
+        ))}
+      </div>
+      {rows.length > 5 ? (
+        <button className="institutional-more" type="button" onClick={() => setExpanded((current) => !current)}>
+          {expanded ? "收合" : `顯示全部 ${rows.length} 筆`}
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -1786,21 +2030,25 @@ function UsMarketCalendarView({
       <section className="status-grid">
         <MetricCard icon={<CalendarClock size={20} />} label="事件數" value={String(calendar?.event_count ?? rows.length)} meta={calendar?.source_label ?? "本機行事曆"} />
         <MetricCard icon={<Activity size={20} />} label="高重要性" value={String(highCount)} meta={nextHigh ? `${nextHigh.date} ${nextHigh.event}` : "目前區間無高重要性"} />
-        <MetricCard icon={<ShieldCheck size={20} />} label="資料狀態" value={calendar?.source === "mock" ? "Mock" : "Live"} meta={`${startDate} 到 ${endDate}`} />
+        <MetricCard icon={<ShieldCheck size={20} />} label="資料狀態" value={calendar?.source === "official_cache" ? "官方快取" : calendar?.source === "official" ? "官方排程" : "無法取得"} meta={`${startDate} 到 ${endDate}`} />
       </section>
 
       <section className="data-panel wide-panel">
         <div className="section-title with-controls">
           <div>
             <CalendarClock size={20} />
-            <h2>美股數據公布行事曆</h2>
+            <h2>美國數據公布行事曆</h2>
           </div>
           <div className="calendar-quick-actions" aria-label="Calendar quick range">
+            <button type="button" onClick={() => onChange(startDate, endDate, importance)}>重新整理</button>
             <button type="button" onClick={() => applyWindow(7)}>7 天</button>
             <button type="button" onClick={() => applyWindow(30)}>30 天</button>
             <button type="button" onClick={() => applyWindow(90)}>90 天</button>
           </div>
         </div>
+
+        <p className="muted calendar-source-note">公布時間已換算為台灣時間；官方行事曆提供日期與時間，預期值及實際值請查看公布機構。{calendar?.source_url ? <><a href={calendar.source_url} target="_blank" rel="noreferrer">紐約聯準銀行 ↗</a> · <a href="https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm" target="_blank" rel="noreferrer">FOMC 會議 ↗</a></> : null}</p>
+        {calendar?.errors?.length ? <p className="sector-warning">部分月份的官方排程暫時無法更新，已顯示可用的資料與快取。</p> : null}
 
         <div className="calendar-controls">
           <label>
@@ -1838,16 +2086,18 @@ function UsMarketCalendarView({
                   </div>
                   <span>{row.category}｜{row.market_impact}</span>
                 </div>
-                <div className="calendar-event-values">
-                  <MetricTiny label="前值" value={row.previous ?? "-"} />
-                  <MetricTiny label="預期" value={row.forecast ?? "-"} />
-                  <MetricTiny label="公布" value={row.actual ?? "待公布"} />
-                </div>
+                  <div className="calendar-event-values">
+                    {row.previous || row.forecast || row.actual ? <>
+                      <MetricTiny label="前值" value={row.previous ?? "-"} />
+                      <MetricTiny label="預期" value={row.forecast ?? "-"} />
+                      <MetricTiny label="公布" value={row.actual ?? "-"} />
+                    </> : row.source_url ? <a href={row.source_url} target="_blank" rel="noreferrer">查看公布機構 ↗</a> : null}
+                  </div>
               </div>
             ))}
           </div>
         ) : (
-          <p className="muted">目前這個日期區間沒有行事曆事件。</p>
+          <p className="muted">{calendar?.source === "unavailable" ? "官方行事曆暫時無法取得；請稍後重新讀取。" : "目前這個日期區間沒有行事曆事件。"}</p>
         )}
       </section>
     </>
@@ -1859,6 +2109,9 @@ function ActiveEtfView({
   changes,
   selectedEtfCode,
   selectedEtfSnapshotDate,
+  refreshJob,
+  refreshStarting,
+  onRefresh,
   onEtfSelect,
   onStockSelect
 }: {
@@ -1866,6 +2119,9 @@ function ActiveEtfView({
   changes: ActiveEtfChanges | null;
   selectedEtfCode: string;
   selectedEtfSnapshotDate: string;
+  refreshJob: ActiveEtfRefreshJob | null;
+  refreshStarting: boolean;
+  onRefresh: () => void;
   onEtfSelect: (etfCode: string, snapshotDate?: string) => Promise<void>;
   onStockSelect: (code: string) => void;
 }) {
@@ -1877,6 +2133,14 @@ function ActiveEtfView({
   const selectedDate = selectedSnapshot?.snapshot_date ?? selectedEtfSnapshotDate;
   return (
     <>
+      <div className="etf-refresh-bar">
+        <span>本地最新快照：{summary?.max_snapshot_date ?? "尚無資料"}</span>
+        <button type="button" onClick={onRefresh} disabled={refreshStarting || refreshJob?.status === "queued" || refreshJob?.status === "running"}>
+          <RefreshCw size={15} /> {refreshStarting || refreshJob?.status === "queued" || refreshJob?.status === "running" ? "更新中…" : "更新 ETF 資料"}
+        </button>
+        {refreshJob?.status === "completed" ? <small>已更新 {refreshJob.result?.count ?? "—"} 檔{refreshJob.result?.failed_count ? `，${refreshJob.result.failed_count} 檔失敗` : ""}</small> : null}
+        {refreshJob?.status === "failed" ? <small className="sector-warning">{refreshJob.error || "ETF 更新失敗"}</small> : null}
+      </div>
       <section className="status-grid">
         <MetricCard icon={<PieChart size={20} />} label="主動 ETF" value={String(summary?.etf_count ?? "-")} />
         <MetricCard icon={<CalendarClock size={20} />} label="一個月快照" value={String(summary?.snapshot_count ?? "-")} meta={`${summary?.window_start_date ?? "-"} 到 ${summary?.window_end_date ?? "-"}`} />
@@ -2218,6 +2482,20 @@ function BacktestParamPanel({
             <ParamNumber label="放量觀察天數" value={params.momentum_volume_volume_lookback} min={1} max={30} onValueChange={(value) => onParamsChange({ momentum_volume_volume_lookback: value })} />
           </>
         ) : null}
+        {strategy === "起漲第一天 / 初始量價轉強" ? (
+          <>
+            <ParamDecimal label="前5日最大漲幅 %" value={params.initial_rise_max_5d_gain_pct} min={-100} max={300} onValueChange={(value) => onParamsChange({ initial_rise_max_5d_gain_pct: value })} />
+            <ParamDecimal label="前10日最大漲幅 %" value={params.initial_rise_max_10d_gain_pct} min={-100} max={300} onValueChange={(value) => onParamsChange({ initial_rise_max_10d_gain_pct: value })} />
+            <ParamDecimal label="今日最小漲幅 %" value={params.initial_rise_min_today_gain_pct} min={-100} max={100} onValueChange={(value) => onParamsChange({ initial_rise_min_today_gain_pct: value })} />
+            <ParamDecimal label="今日最大漲幅 %" value={params.initial_rise_max_today_gain_pct} min={-100} max={300} onValueChange={(value) => onParamsChange({ initial_rise_max_today_gain_pct: value })} />
+            <ParamNumber label="均量基準天數" value={params.initial_rise_volume_ma_period} min={2} max={260} onValueChange={(value) => onParamsChange({ initial_rise_volume_ma_period: value })} />
+            <ParamDecimal label="起量倍數" value={params.initial_rise_min_volume_ratio} min={0.1} max={20} onValueChange={(value) => onParamsChange({ initial_rise_min_volume_ratio: value })} />
+            <ParamNumber label="前量安靜天數" value={params.initial_rise_quiet_volume_days} min={1} max={30} onValueChange={(value) => onParamsChange({ initial_rise_quiet_volume_days: value })} />
+            <ParamNumber label="整理區天數" value={params.initial_rise_consolidation_days} min={5} max={260} onValueChange={(value) => onParamsChange({ initial_rise_consolidation_days: value })} />
+            <ParamDecimal label="整理最大寬度 %" value={params.initial_rise_max_range_width_pct} min={0.1} max={200} onValueChange={(value) => onParamsChange({ initial_rise_max_range_width_pct: value })} />
+            <ParamDecimal label="收盤位置" value={params.initial_rise_min_close_position} min={0} max={1} onValueChange={(value) => onParamsChange({ initial_rise_min_close_position: value })} />
+          </>
+        ) : null}
         <ParamNumber label="盤整天數" value={params.range_lookback_days} min={5} max={260} onValueChange={(value) => onParamsChange({ range_lookback_days: value })} />
         <ParamDecimal label="盤整最大寬度 %" value={params.range_max_width_pct} min={1} max={200} onValueChange={(value) => onParamsChange({ range_max_width_pct: value })} />
         <ParamDecimal label="量增倍率" value={params.range_volume_ratio} min={0.1} max={10} onValueChange={(value) => onParamsChange({ range_volume_ratio: value })} />
@@ -2269,16 +2547,16 @@ function normalizeBacktestResults(preview: BacktestJob["result_preview"]): Backt
       code,
       name: getString(row.name) || code,
       price: getNumber(row.price ?? row.ending_capital),
-      score: getNumber(row.bowl_volume_score ?? row.momentum_volume_score ?? row.near_breakout_score ?? row.pullback_score ?? row.high_price_pullback_score ?? row.vcp_score ?? row.bowl_score),
+      score: getNumber(row.initial_rise_score ?? row.bowl_volume_score ?? row.momentum_volume_score ?? row.near_breakout_score ?? row.pullback_score ?? row.high_price_pullback_score ?? row.vcp_score ?? row.bowl_score),
       rsSpreadPct: getNumber(row.rs_spread_pct ?? row.avg_buy_rs_spread),
-      volumeRatio: getNumber(row.bowl_volume_signal_ratio ?? row.momentum_volume_signal_ratio ?? row.momentum_volume_ratio_max_3d ?? row.bowl_volume_volume_ratio ?? row.near_breakout_volume_ratio ?? row.current_volume_ratio ?? row.recent3_volume_ratio ?? row.avg5_volume_ratio),
+      volumeRatio: getNumber(row.initial_rise_volume_ratio_today ?? row.bowl_volume_signal_ratio ?? row.momentum_volume_signal_ratio ?? row.momentum_volume_ratio_max_3d ?? row.bowl_volume_volume_ratio ?? row.near_breakout_volume_ratio ?? row.current_volume_ratio ?? row.recent3_volume_ratio ?? row.avg5_volume_ratio),
       volumeSignalDate: getString(row.bowl_volume_signal_date ?? row.momentum_volume_signal_date),
-      volumeSignalPriceChangePct: getNumber(row.bowl_volume_signal_price_change_pct ?? row.momentum_volume_signal_price_change_pct),
+      volumeSignalPriceChangePct: getNumber(row.initial_rise_today_return_pct ?? row.bowl_volume_signal_price_change_pct ?? row.momentum_volume_signal_price_change_pct),
       daysSinceVolumeSignal: getNumber(row.bowl_volume_days_since_volume_signal ?? row.momentum_volume_days_since_signal),
       returnPct: getNumber(row.total_return),
       totalTrades: getNumber(row.total_trades),
-      positiveReasons: firstStringList(row.bowl_volume_positive_reasons, row.momentum_volume_positive_reasons, row.near_breakout_positive_reasons, row.positive_reasons, row.pullback_positive_reasons, row.vcp_positive_reasons, row.high_price_pullback_positive_reasons),
-      cautionReasons: firstStringList(row.bowl_volume_caution_reasons, row.momentum_volume_caution_reasons, row.near_breakout_caution_reasons, row.caution_reasons, row.pullback_caution_reasons, row.vcp_caution_reasons, row.high_price_pullback_caution_reasons)
+      positiveReasons: firstStringList(row.initial_rise_positive_reasons, row.bowl_volume_positive_reasons, row.momentum_volume_positive_reasons, row.near_breakout_positive_reasons, row.positive_reasons, row.pullback_positive_reasons, row.vcp_positive_reasons, row.high_price_pullback_positive_reasons),
+      cautionReasons: firstStringList(row.initial_rise_caution_reasons, row.bowl_volume_caution_reasons, row.momentum_volume_caution_reasons, row.near_breakout_caution_reasons, row.caution_reasons, row.pullback_caution_reasons, row.vcp_caution_reasons, row.high_price_pullback_caution_reasons)
     };
   });
 }
@@ -2538,33 +2816,132 @@ function SystemView({ overview }: { overview: DashboardOverview | null }) {
   );
 }
 
+function classificationSourceLabel(source: string) {
+  const labels: Record<string, string> = {
+    curated_v4: "V4 人工校訂", official_value_chain_v4: "TPEx 產業價值鏈",
+    tpex_company_chain: "TPEx 公司產業鏈", official_product_text: "公司產品資料",
+    mops_main_business: "MOPS 營業項目", mops_business_rule: "MOPS 營業項目",
+    official_evidence_primary: "官方產品與產業鏈", manual_verified: "人工確認"
+  };
+  return labels[source] || source;
+}
+
+function classificationEvidenceUrl(urls: string | null | undefined) {
+  return urls?.split(",").find(url => url.startsWith("https://")) || null;
+}
+
+function StockClassificationPanel({ stockOverview }: { stockOverview: StockOverview }) {
+  const classification = stockOverview.classification;
+  const security = stockOverview.security;
+  if (!security) return null;
+  const primary = classification?.primary;
+  const review = classification?.review;
+  const reason = review?.reason === "ambiguous_official_products"
+    ? "有多個已驗證細產業，尚無法可靠判定主要業務"
+    : "現有官方資料不足以確認細產業";
+  return <article className="stock-panel stock-classification-panel">
+    <div className="section-title"><Layers3 size={20} /><h2>細產業分類</h2>
+      <span className={`stock-classification-status ${primary ? "confirmed" : "review"}`}>
+        {primary ? "已確認主要 L3" : classification ? "主要 L3 待覆核" : "未納入細產業名單"}
+      </span>
+    </div>
+    {classification ? <>
+      {primary ? <div className="stock-primary-sector">
+        <div><small>L1 大產業</small><strong>{primary.l1}</strong></div>
+        <div><small>L2 次產業</small><strong>{primary.l2}</strong></div>
+        <div><small>L3 主要細產業</small><strong>{primary.l3}</strong></div>
+      </div> : <p className="stock-classification-note">{reason}。目前保留已確認的成分歸屬，主要資金流暫不分配到單一產業。</p>}
+      <div className="stock-membership-head"><h3>全部已驗證的 L3 歸屬</h3><span>{classification.memberships.length} 類</span></div>
+      {classification.memberships.length ? <div className="stock-membership-grid">
+        {classification.memberships.map(member => {
+          const isPrimary = primary?.sector_key === member.sector_key;
+          const evidenceUrl = classificationEvidenceUrl(member.source_urls);
+          return <div className={`stock-membership-card ${isPrimary ? "primary" : ""}`} key={member.sector_key}>
+            <div className="stock-membership-heading"><strong>{member.l3}</strong>{isPrimary ? <em>主要</em> : <em>跨產業</em>}</div>
+            <small>{member.l1} / {member.l2}</small>
+            <span>{member.sources.split(",").map(classificationSourceLabel).join(" · ")}</span>
+            {evidenceUrl ? <a href={evidenceUrl} target="_blank" rel="noreferrer">查看官方依據 ↗</a> : null}
+          </div>;
+        })}
+      </div> : <p className="muted">尚無可可靠對應的 L3；不以官方大產業直接充當細分類。</p>}
+      {!primary && !classification.memberships.length && classification.levels.length ? <p className="stock-classification-levels">已確認上層方向：{classification.levels.map(level => level.l2 ? `${level.l1} / ${level.l2}` : level.l1).join("、")}</p> : null}
+      {classification.main_business ? <details className="stock-classification-evidence"><summary>官方營業項目與分類說明</summary>
+        <p>{classification.main_business}</p>
+        <div>{classification.business_source_url?.startsWith("https://") ? <a href={classification.business_source_url} target="_blank" rel="noreferrer">MOPS 公司資料 ↗</a> : null}
+        {classification.product_source_url?.startsWith("https://") ? <a href={classification.product_source_url} target="_blank" rel="noreferrer">公司產品資料 ↗</a> : null}</div>
+      </details> : null}
+      <p className="stock-classification-footnote">主要 L3 用於成交額與法人股數歸戶；全部已驗證 L3 用於成分股、廣度與產業輪動。</p>
+    </> : <p className="muted">此股目前不在電子及相鄰產業細分類名單；上方「官方產業」仍可作為大類參考。</p>}
+  </article>;
+}
+
 function StockIdentity({ stockOverview }: { stockOverview: StockOverview | null }) {
+  const security = stockOverview?.security;
+  const latestQuote = stockOverview?.latest_quote;
+  const shares = security?.issued_common_shares;
+  const estimatedMarketCap = shares && latestQuote?.close ? shares * latestQuote.close : null;
   return (
     <div className="stock-result">
-      {stockOverview?.found && stockOverview.security ? (
+      {stockOverview?.found && security ? (
         <>
           <strong>
-            {stockOverview.security.name_zh} <span>{stockOverview.security.code}</span>
+            {security.name_zh} <span>{security.code}</span>
           </strong>
-          <p>{stockOverview.security.full_name_zh || stockOverview.security.yfinance_symbol}</p>
+          <p>{security.full_name_zh || security.yfinance_symbol}</p>
           <dl>
             <div>
               <dt>市場</dt>
-              <dd>{stockOverview.security.market}</dd>
+              <dd>{security.market === "TWSE" ? "上市" : security.market === "TPEx" ? "上櫃" : security.market}</dd>
             </div>
             <div>
-              <dt>Yahoo Symbol</dt>
-              <dd>{stockOverview.security.yfinance_symbol}</dd>
+              <dt>官方產業</dt>
+              <dd>{security.industry || security.industry_code || "-"}</dd>
             </div>
             <div>
-              <dt>產業</dt>
-              <dd>{stockOverview.security.industry || stockOverview.security.industry_code || "-"}</dd>
+              <dt>{latestQuote?.is_current === false ? "最後成交價" : "最新收盤價"}</dt>
+              <dd>{latestQuote?.close == null ? "-" : `${formatPrice(latestQuote.close)} 元`}</dd>
             </div>
             <div>
-              <dt>價格快取</dt>
-              <dd>{formatCacheRange(stockOverview.price_cache)}</dd>
+              <dt>本益比</dt>
+              <dd>{formatRatio(stockOverview.valuation?.pe_ratio)}</dd>
+            </div>
+            <div>
+              <dt>基本 EPS（年初累計）</dt>
+              <dd>{stockOverview.eps ? `${stockOverview.eps.basic_eps_ytd.toFixed(2)} 元` : "—"}</dd>
+            </div>
+            <div>
+              <dt>殖利率</dt>
+              <dd>{formatUnsignedPct(stockOverview.valuation?.dividend_yield_pct)}</dd>
+            </div>
+            <div>
+              <dt>股價淨值比</dt>
+              <dd>{formatRatio(stockOverview.valuation?.pb_ratio)}</dd>
+            </div>
+            <div>
+              <dt>估算市值</dt>
+              <dd>{formatTwdAmount(estimatedMarketCap)}</dd>
+            </div>
+            <div>
+              <dt>實收資本額</dt>
+              <dd>{formatTwdAmount(security.paid_in_capital)}</dd>
+            </div>
+            <div>
+              <dt>發行普通股數</dt>
+              <dd>{formatShareCount(shares)}</dd>
             </div>
           </dl>
+          <p className="stock-valuation-date">
+            評價資料日期：{stockOverview.valuation?.data_date ?? "暫無"}
+            {latestQuote?.trade_date ? ` · 收盤價日期：${latestQuote.trade_date}` : ""}
+            {latestQuote?.is_current === false ? ` · 最近交易日 ${stockOverview.market_trade_date || "—"} 無成交資料` : ""}
+          </p>
+          <p className="stock-valuation-date">
+            {stockOverview.eps ? <>
+              財報 EPS：{stockOverview.eps.report_year} Q{stockOverview.eps.report_quarter} 年初至該季累計
+              {stockOverview.eps.output_date ? ` · 出表 ${stockOverview.eps.output_date}` : ""}
+              {stockOverview.eps.source_url.startsWith("https://") ? <> · <a href={stockOverview.eps.source_url} target="_blank" rel="noreferrer">MOPS 官方綜合損益表 ↗</a></> : null}
+            </> : "尚無已匯入的官方 EPS 財報"}
+          </p>
         </>
       ) : (
         <p className="muted">尚未查到股票資料</p>
@@ -2575,12 +2952,14 @@ function StockIdentity({ stockOverview }: { stockOverview: StockOverview | null 
 
 function viewTitle(view: ViewKey) {
   return {
-    overview: "台股資料中樞",
+    overview: "Market Dashboard",
     stock: "個股詳頁",
+    events: "法說會與財報日期",
     favorites: "最愛清單",
     strong: "強勢個股",
     data: "本機資料更新",
     market: "產業地圖",
+    rotation: "全電子股產業輪動",
     broker: "券商分點",
     revenue: "月營收動能",
     usCalendar: "美股數據行事曆",
@@ -2606,11 +2985,11 @@ function SummaryRow({ label, value, ok }: { label: string; value: number | strin
   );
 }
 
-function MiniDataCard({ label, value }: { label: string; value: number | string }) {
+function MiniDataCard({ label, value, tone = "" }: { label: string; value: number | string; tone?: string }) {
   return (
     <div className="mini-data-card">
       <span>{label}</span>
-      <strong>{typeof value === "number" ? value.toLocaleString() : value}</strong>
+      <strong className={tone}>{typeof value === "number" ? value.toLocaleString() : value}</strong>
     </div>
   );
 }
@@ -2657,7 +3036,7 @@ function StrongStocksList({
             <strong>{formatPrice(row.latest_close)}</strong>
             <em>{formatSigned(row.change)}</em>
           </span>
-          <span className={`strong-stock-change ${row.change_pct >= 0 ? "up" : "down"}`}>
+          <span className={`strong-stock-change ${row.change_pct > 0 ? "up" : row.change_pct < 0 ? "down" : ""}`}>
             {formatChangePct(row.change_pct)}
           </span>
           <Sparkline values={row.sparkline.map((item) => item.close)} rising={row.change_pct >= 0} />
@@ -2861,6 +3240,25 @@ function formatPct(value: number | null | undefined) {
 function formatLargeAmount(value: number | null | undefined) {
   if (value === null || value === undefined) return "-";
   return `${(value / 100000).toLocaleString(undefined, { maximumFractionDigits: 1 })} 億`;
+}
+
+function formatRatio(value: number | null | undefined) {
+  return value === null || value === undefined ? "-" : `${value.toFixed(2)} 倍`;
+}
+
+function formatUnsignedPct(value: number | null | undefined) {
+  return value === null || value === undefined ? "-" : `${value.toFixed(2)}%`;
+}
+
+function formatTwdAmount(value: number | null | undefined) {
+  return value === null || value === undefined ? "-" : `${(value / 100000000).toLocaleString(undefined, { maximumFractionDigits: 1 })} 億元`;
+}
+
+function formatShareCount(value: number | null | undefined) {
+  if (value === null || value === undefined) return "-";
+  return value >= 100000000
+    ? `${(value / 100000000).toLocaleString(undefined, { maximumFractionDigits: 2 })} 億股`
+    : `${(value / 10000).toLocaleString(undefined, { maximumFractionDigits: 0 })} 萬股`;
 }
 
 function formatShortMonth(value: string | null | undefined) {

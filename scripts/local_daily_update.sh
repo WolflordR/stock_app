@@ -58,9 +58,9 @@ mkdir -p "${LOG_DIR}"
   "${PYTHON_BIN}" -m apps.worker.daily_update "${DAILY_ARGS[@]}"
 
   if [[ "${TRADE_DAILY_IMPORT_BROKER:-1}" == "1" ]]; then
-    BROKER_DIR="${PROJECT_ROOT}/data/raw/broker/twse/${RUN_DATE}"
+    BROKER_DIR="${PROJECT_ROOT}/data/raw/broker/twse"
     if [[ -d "${BROKER_DIR}" ]]; then
-      "${PYTHON_BIN}" -m apps.worker.import_broker_csv_folder --date "${RUN_DATE}" --progress-every 100
+      "${PYTHON_BIN}" -m apps.worker.import_broker_csv_folder --missing-only --progress-every 100
     else
       echo "broker_import=skipped missing_dir=${BROKER_DIR}"
     fi

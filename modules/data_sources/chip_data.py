@@ -13,6 +13,7 @@ from modules.data_sources.market_watch import fetch_twse_daily_quotes
 
 DB_PATH = db_path("chip_cache.db")
 TWSE_T86_URL = "https://www.twse.com.tw/rwd/zh/fund/T86"
+TPEX_DAILY_INSTI_URL = "https://www.tpex.org.tw/web/stock/3insti/daily_trade/3itrade_hedge_result.php"
 INVESTOR_COLUMN_MAP = {
     "三大法人": "total_net",
     "外資": "foreign_net",
@@ -284,6 +285,48 @@ def fetch_twse_institutional_trading(trade_date):
         return parsed_rows
 
     return []
+
+
+def fetch_tpex_institutional_trading(trade_date):
+    """Fetch TPEx per-stock institutional net shares for the exact trade date."""
+    init_chip_cache()
+    trade_date_str = pd.to_datetime(trade_date).strftime("%Y-%m-%d")
+    if pd.to_datetime(trade_date_str).weekday() >= 5:
+        return []
+    cached_rows = _load_exact_cached_rows("TPEx", trade_date_str)
+    if cached_rows:
+        return cached_rows
+    roc_date = pd.to_datetime(trade_date_str).strftime(f"{int(trade_date_str[:4]) - 1911:03d}/%m/%d")
+    try:
+        payload = _fetch_json(TPEX_DAILY_INSTI_URL, {"l": "zh-tw", "o": "json", "d": roc_date, "se": "EW", "t": "D"})
+    except Exception:
+        return []
+    tables = payload.get("tables") or []
+    if not tables or tables[0].get("date") != roc_date:
+        return []
+    parsed = []
+    for row in tables[0].get("data") or []:
+        if len(row) < 24:
+            continue
+        code = str(row[0]).strip()
+        if not (len(code) == 4 and code.isdigit() and code[0] != "0"):
+            continue
+        foreign_buy, foreign_sell, foreign_net = (_parse_int(row[index]) for index in (8, 9, 10))
+        trust_buy, trust_sell, trust_net = (_parse_int(row[index]) for index in (11, 12, 13))
+        dealer_buy, dealer_sell, dealer_net = (_parse_int(row[index]) for index in (20, 21, 22))
+        total_net = _parse_int(row[23])
+        if foreign_net + trust_net + dealer_net != total_net:
+            raise ValueError(f"TPEx institutional net mismatch for {code} on {trade_date_str}")
+        parsed.append({
+            "code": code, "name_zh": str(row[1]).strip(),
+            "foreign_buy": foreign_buy, "foreign_sell": foreign_sell, "foreign_net": foreign_net,
+            "trust_buy": trust_buy, "trust_sell": trust_sell, "trust_net": trust_net,
+            "dealer_buy": dealer_buy, "dealer_sell": dealer_sell, "dealer_net": dealer_net,
+            "total_net": total_net,
+        })
+    if parsed:
+        _save_rows("TPEx", trade_date_str, parsed)
+    return parsed
 
 
 def build_institutional_rankings(trade_date, investor_type="三大法人", top_n=20, code_filter=""):

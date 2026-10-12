@@ -189,7 +189,7 @@ def _goalstar_label_from_status(status):
 def _is_target_active_etf(item):
     code = str(item.get("code") or "").strip().upper()
     name = str(item.get("name") or "").strip()
-    return code.endswith("A") and name.startswith("主動")
+    return bool(code) and name.startswith("主動")
 
 
 @lru_cache(maxsize=1)
@@ -867,3 +867,67 @@ def refresh_all_active_etf_history_snapshots(limit=None):
         "items": refreshed,
         "updated_at": summary.get("updated_at"),
     }
+
+
+def refresh_latest_active_etf_snapshots(limit=None):
+    """Persist the latest public ETF changes without the costly history backfill."""
+    load_active_etf_summary.cache_clear()
+    load_active_etf_detail.cache_clear()
+    summary = load_active_etf_summary()
+    items = [item for item in summary.get("items", []) if item.get("code")]
+    if limit is not None:
+        items = items[:max(0, int(limit))]
+    refreshed = []
+    failed = []
+    for item in items:
+        code = str(item["code"]).strip().upper()
+        try:
+            detail = load_active_etf_detail(code)
+            active = detail.get("active") or {}
+            base = detail.get("base") or {}
+            latest_diff = active.get("latestDiff") or {}
+            snapshot_date = str(latest_diff.get("toDate") or "").strip()
+            if not snapshot_date:
+                raise ValueError("missing latest change snapshot date")
+            changes = pd.DataFrame(latest_diff.get("changes") or [])
+            if not changes.empty:
+                changes = fill_missing_industry(changes)
+                changes["change_label"] = changes.apply(_classify_change_type, axis=1)
+                for source, target in (
+                    ("sharesDelta", "shares_delta"), ("oldWeight", "old_weight"),
+                    ("newWeight", "new_weight"), ("weightDelta", "weight_delta"),
+                    ("newShares", "new_shares"),
+                ):
+                    changes[target] = changes[source].map(_to_float) if source in changes else pd.Series(float("nan"), index=changes.index)
+                changes["shares_delta_lots"] = changes["shares_delta"] / 1000
+                changes["new_lots"] = changes["new_shares"] / 1000
+                latest_aum = _to_float((base.get("latestMarket") or {}).get("aum"))
+                changes["holding_amount_100m"] = (
+                    latest_aum * changes["new_weight"] / 10000000000
+                    if latest_aum is not None else None
+                )
+            counts = {label: int((changes["change_label"] == label).sum()) if not changes.empty else 0
+                      for label in ("新增", "加碼", "減碼", "刪除")}
+            persist_etf_change_snapshot(
+                code, active.get("name") or item.get("name") or code,
+                {
+                    "from_date": latest_diff.get("fromDate"),
+                    "to_date": snapshot_date,
+                    "holdings_count": latest_diff.get("holdingsCount"),
+                    "turnover_rate": active.get("turnoverRate"),
+                    "aum_100m": None,
+                    "beneficiary_10k": None,
+                    "issuer": item.get("issuer"),
+                    "change_count": len(changes),
+                    "change_counts": counts,
+                },
+                changes, active.get("updatedAt") or summary.get("updated_at"),
+            )
+            refreshed.append({"code": code, "snapshot_date": snapshot_date, "change_count": len(changes)})
+        except Exception as exc:
+            failed.append({"code": code, "error": str(exc)})
+    if failed and not refreshed:
+        raise RuntimeError(f"ETF refresh failed for all {len(items)} funds: {failed}")
+    return {"count": len(refreshed), "latest_snapshot_date": max((row["snapshot_date"] for row in refreshed), default=None),
+            "items": refreshed, "failed": failed, "failed_count": len(failed),
+            "source_updated_at": summary.get("updated_at")}

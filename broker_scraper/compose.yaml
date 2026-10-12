@@ -1,0 +1,30 @@
+name: trade-broker
+
+services:
+  scraper:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: trade-broker-scraper:local
+    environment:
+      TRADE_RAW_DATA_DIR: /trade/data/raw
+      TRADE_LOGS_DIR: /trade/logs
+      BROKER_DAILY_TIME: ${BROKER_DAILY_TIME:-19:00}
+      TZ: Asia/Taipei
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+    volumes:
+      - ${TRADE_NAS_ROOT:?Set TRADE_NAS_ROOT}/data:/trade/data
+      - ${TRADE_NAS_ROOT:?Set TRADE_NAS_ROOT}/logs:/trade/logs
+    mem_limit: 700m
+    cpus: 1.0
+    pids_limit: 128
+    restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

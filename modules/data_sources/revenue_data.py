@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 import io
+import re
 import sqlite3
 
 import pandas as pd
+from bs4 import BeautifulSoup
 
 from modules.core.project_paths import db_path
 from modules.core.http_utils import request_text
@@ -15,6 +17,7 @@ MONTHLY_REVENUE_URLS = {
     "上市": "https://mopsfin.twse.com.tw/opendata/t187ap05_L.csv",
     "上櫃": "https://mopsfin.twse.com.tw/opendata/t187ap05_O.csv",
 }
+HISTORICAL_REVENUE_MARKETS = {"上市": "sii", "上櫃": "otc"}
 
 
 def _get_connection():
@@ -220,12 +223,103 @@ def refresh_monthly_revenue_snapshot():
         _fetch_market_snapshot(market, url)
         for market, url in MONTHLY_REVENUE_URLS.items()
     ]
+    # The open-data CSV is a complete monthly snapshot and may lag the MOPS
+    # current-month archive while companies publish their reports one by one.
+    previous_month = (datetime.now().replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
+    latest_csv_month = max((frame["report_month"].max() for frame in revenue_frames if not frame.empty), default="")
+    if latest_csv_month < previous_month:
+        for market in HISTORICAL_REVENUE_MARKETS:
+            try:
+                revenue_frames.append(_fetch_historical_revenue_month(market, previous_month))
+            except Exception as exc:
+                # Keep the complete CSV snapshot when the partial archive is not ready.
+                import logging
+                logging.getLogger(__name__).warning("Current month revenue archive unavailable for %s: %s", market, exc)
     combined_df = pd.concat(revenue_frames, ignore_index=True).drop_duplicates(
         subset=["report_month", "market", "code"],
         keep="last",
     )
     _save_snapshot(combined_df)
     return combined_df
+
+
+def _fetch_historical_revenue_month(market: str, report_month: str) -> pd.DataFrame:
+    year, month = (int(part) for part in report_month.split("-"))
+    roc_year = year - 1911
+    market_path = HISTORICAL_REVENUE_MARKETS[market]
+    records = []
+    for group in (0, 1):
+        url = (
+            f"https://mopsov.twse.com.tw/nas/t21/{market_path}/"
+            f"t21sc03_{roc_year}_{month}_{group}.html"
+        )
+        html = request_text(url, encoding="big5")
+        soup = BeautifulSoup(html, "html.parser")
+        industry = ""
+        group_count = 0
+        for tr in soup.find_all("tr"):
+            for th in tr.find_all("th", recursive=False):
+                heading = th.get_text(" ", strip=True)
+                if heading.startswith("產業別："):
+                    industry = heading.partition("：")[2]
+            cells = [td.get_text(" ", strip=True) for td in tr.find_all("td", recursive=False)]
+            if len(cells) != 11 or not re.fullmatch(r"\d{4,6}", cells[0]):
+                continue
+            numbers = [_safe_float(value.replace(",", "")) for value in cells[2:10]]
+            records.append(
+                {
+                    "report_month": report_month,
+                    "output_date": None,
+                    "market": market,
+                    "code": cells[0],
+                    "name_zh": cells[1],
+                    "industry": industry,
+                    "current_revenue": numbers[0],
+                    "previous_revenue": numbers[1],
+                    "last_year_revenue": numbers[2],
+                    "mom_pct": numbers[3],
+                    "yoy_pct": numbers[4],
+                    "cumulative_revenue": numbers[5],
+                    "cumulative_last_year_revenue": numbers[6],
+                    "cumulative_yoy_pct": numbers[7],
+                    "remark": "" if cells[10] == "-" else cells[10],
+                    "updated_at": datetime.now().isoformat(timespec="seconds"),
+                }
+            )
+            group_count += 1
+        if not group_count:
+            raise ValueError(f"Historical revenue has no stock rows: {url}")
+    return pd.DataFrame.from_records(records).drop_duplicates(
+        subset=["report_month", "market", "code"], keep="last"
+    )
+
+
+def backfill_recent_monthly_revenue(months: int = 12) -> int:
+    """Fill missing market-month archives for the latest available year."""
+    init_revenue_cache()
+    with _get_connection() as conn:
+        latest_month = conn.execute("SELECT MAX(report_month) FROM monthly_revenue").fetchone()[0]
+        cached_months = {
+            (report_month, market)
+            for report_month, market in conn.execute(
+                "SELECT DISTINCT report_month, market FROM monthly_revenue"
+            )
+        }
+    if not latest_month:
+        return 0
+
+    year, month = (int(part) for part in latest_month.split("-"))
+    latest_index = year * 12 + month - 1
+    inserted = 0
+    for month_index in range(latest_index - max(1, months) + 1, latest_index + 1):
+        report_month = f"{month_index // 12:04d}-{month_index % 12 + 1:02d}"
+        for market in HISTORICAL_REVENUE_MARKETS:
+            if (report_month, market) in cached_months:
+                continue
+            history = _fetch_historical_revenue_month(market, report_month)
+            _save_snapshot(history)
+            inserted += len(history)
+    return inserted
 
 
 def get_latest_monthly_revenue(force_refresh=False, max_cache_age_hours=12):

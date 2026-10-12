@@ -107,6 +107,25 @@ class SQLiteJobStore:
             return row["job_id"]
         return None
 
+    def cancel_active_jobs(self, job_type: str, *, message: str = "已取消舊的背景任務") -> int:
+        now = datetime.now().isoformat(timespec="seconds")
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE api_jobs
+                SET status = 'cancelled',
+                    progress = 1.0,
+                    message = ?,
+                    updated_at = ?,
+                    finished_at = COALESCE(finished_at, ?)
+                WHERE job_type = ?
+                  AND status IN ('queued', 'running')
+                """,
+                (message, now, now, job_type),
+            )
+            conn.commit()
+            return int(cursor.rowcount or 0)
+
     def find_latest_job_id(self, job_type: str) -> str | None:
         with self._connect() as conn:
             row = conn.execute(

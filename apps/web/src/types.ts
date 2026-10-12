@@ -129,6 +129,26 @@ export type StockDetail = {
   security: Security | null;
 };
 
+export type StockSectorNode = {
+  sector_key: string;
+  l1: string;
+  l2: string;
+  l3: string;
+  confidence: number;
+};
+
+export type StockSectorClassification = {
+  status: "confirmed_primary" | "needs_review";
+  company: { market: string; stock_id: string; name: string; official_industry_code: string | null };
+  primary: (StockSectorNode & { source: string; source_url: string | null }) | null;
+  memberships: (StockSectorNode & { sources: string; source_urls: string | null })[];
+  levels: { l1: string; l2: string | null }[];
+  review: { reason: string; possible_category: string | null } | null;
+  main_business: string | null;
+  business_source_url: string | null;
+  product_source_url: string | null;
+};
+
 export type PriceCacheStatus = {
   symbol: string;
   last_updated_at: string | null;
@@ -245,11 +265,27 @@ export type PriceQuote = {
 export type QuoteSummary = PriceQuote & {
   change: number | null;
   change_pct: number | null;
+  is_current?: boolean | null;
 };
 
 export type StockOverview = StockDetail & {
+  market_trade_date?: string | null;
+  classification: StockSectorClassification | null;
   price_cache: PriceCacheStatus | null;
   latest_quote: QuoteSummary | null;
+  valuation: {
+    data_date: string | null;
+    pe_ratio: number | null;
+    dividend_yield_pct: number | null;
+    pb_ratio: number | null;
+  } | null;
+  eps: {
+    report_year: number;
+    report_quarter: number;
+    basic_eps_ytd: number;
+    output_date: string | null;
+    source_url: string;
+  } | null;
   quotes: PriceQuote[];
   broker_summary: BrokerSummary | null;
   institutional_trading: InstitutionalTradingRow[];
@@ -352,6 +388,21 @@ export type PriceCacheJobResponse = {
   error?: string;
 };
 
+export type ActiveEtfRefreshJob = {
+  job_id: string;
+  status: "queued" | "running" | "completed" | "failed";
+  message: string | null;
+  error: string | null;
+  result?: { count: number; latest_snapshot_date: string | null; failed_count: number } | null;
+};
+
+export type ActiveEtfRefreshJobResponse = {
+  ok: boolean;
+  job?: ActiveEtfRefreshJob | null;
+  job_id?: string;
+  error?: string;
+};
+
 export type BootstrapJobsResponse = {
   ok: boolean;
   price_cache?: {
@@ -421,11 +472,18 @@ export type UsMarketCalendarEvent = {
   actual: string | null;
   unit: string | null;
   market_impact: string;
+  source_name?: string;
+  source_url?: string;
+  original_event?: string;
 };
 
 export type UsMarketCalendar = {
   source: string;
   source_label: string;
+  source_url?: string;
+  last_updated_at?: string | null;
+  errors?: string[];
+  time_zone?: string;
   start_date: string;
   end_date: string;
   importance: string;

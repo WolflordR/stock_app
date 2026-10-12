@@ -8,11 +8,12 @@
 
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/ralph/Desktop/code/trade/scripts/local_daily_update.sh</string>
+    <string>/bin/bash</string>
+    <string>__TRADE_PROJECT_ROOT__/scripts/local_daily_update.sh</string>
   </array>
 
   <key>WorkingDirectory</key>
-  <string>/Users/ralph/Desktop/code/trade</string>
+  <string>__TRADE_HOME__</string>
 
   <key>StartCalendarInterval</key>
   <array>
@@ -24,10 +25,10 @@
   </array>
 
   <key>StandardOutPath</key>
-  <string>/Users/ralph/Desktop/code/trade/logs/local_daily_update/launchd.out.log</string>
+  <string>__TRADE_HOME__/Library/Logs/TradeLab/launchd.out.log</string>
 
   <key>StandardErrorPath</key>
-  <string>/Users/ralph/Desktop/code/trade/logs/local_daily_update/launchd.err.log</string>
+  <string>__TRADE_HOME__/Library/Logs/TradeLab/launchd.err.log</string>
 
   <key>RunAtLoad</key>
   <false/>
