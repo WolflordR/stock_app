@@ -3,10 +3,12 @@ from __future__ import annotations
 import fcntl
 import json
 import sqlite3
+import sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from apps.worker import nas_scheduler
+from apps.worker import import_broker_csv_folder as broker_import_worker
 from apps.worker.import_broker_csv_folder import import_broker_csv_folder
 from modules.data_sources import official_broker_import
 
@@ -56,3 +58,37 @@ def test_broker_import_waits_until_downloader_releases_lock(tmp_path, monkeypatc
     assert state["status"] == "ok"
     assert state["last_attempt"] == "2026-10-10"
     assert "--missing-only" in commands[0]
+
+
+def test_broker_import_log_is_readable_without_docker_access(tmp_path, monkeypatch):
+    monkeypatch.setattr(nas_scheduler, "HEARTBEAT_FILE", tmp_path / "heartbeat.json")
+    log_path = tmp_path / "logs" / "broker_import" / "import_2026-10-13.log"
+    code = nas_scheduler._run_with_heartbeat(
+        [sys.executable, "-c", "import sys; print('import summary'); print('failed csv', file=sys.stderr)"],
+        timeout=10,
+        log_path=log_path,
+    )
+    assert code == 0
+    assert "import summary" in log_path.read_text(encoding="utf-8")
+    assert "failed csv" in log_path.read_text(encoding="utf-8")
+
+
+def test_broker_import_retries_a_temporary_sqlite_lock(tmp_path, monkeypatch):
+    folder = tmp_path / "raw" / "2026-10-13"
+    folder.mkdir(parents=True)
+    (folder / "2330_bsr.csv").write_text("valid fixture", encoding="utf-8")
+    calls = 0
+
+    def import_report(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise sqlite3.OperationalError("database is locked")
+        return {"stock_code": kwargs["stock_code"]}
+
+    monkeypatch.setattr(broker_import_worker, "import_official_broker_csv", import_report)
+    monkeypatch.setattr(broker_import_worker.time, "sleep", lambda _seconds: None)
+    result = import_broker_csv_folder(root=tmp_path / "raw")
+    assert calls == 2
+    assert result["imported_count"] == 1
+    assert result["failed_count"] == 0

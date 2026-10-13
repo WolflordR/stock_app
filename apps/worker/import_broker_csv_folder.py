@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import re
+import sqlite3
+import time
 from pathlib import Path
 from typing import Any
 
@@ -67,15 +69,21 @@ def import_broker_csv_folder(
             )
             continue
         try:
-            imported.append(
-                import_official_broker_csv(
-                    csv_path,
-                    market=market.upper(),
-                    trade_date=file_trade_date,
-                    stock_code=stock_code,
-                    source="TWSE_CSV_FOLDER" if market.upper() == "TWSE" else "TPEX_CSV_FOLDER",
-                )
-            )
+            for attempt in range(2):
+                try:
+                    report = import_official_broker_csv(
+                        csv_path,
+                        market=market.upper(),
+                        trade_date=file_trade_date,
+                        stock_code=stock_code,
+                        source="TWSE_CSV_FOLDER" if market.upper() == "TWSE" else "TPEX_CSV_FOLDER",
+                    )
+                    break
+                except sqlite3.OperationalError as exc:
+                    if attempt or not any(word in str(exc).lower() for word in ("locked", "busy")):
+                        raise
+                    time.sleep(5)
+            imported.append(report)
             imported_keys.add((file_trade_date, stock_code))
         except Exception as exc:
             failed.append({"file": str(csv_path), "reason": str(exc)})
@@ -125,8 +133,8 @@ def main() -> int:
         f"匯入 {result['imported_count']}，失敗 {result['failed_count']}，略過 {result['skipped_count']}"
     )
     if result["failed"]:
-        print("失敗範例：")
-        for item in result["failed"][:5]:
+        print("匯入失敗：")
+        for item in result["failed"]:
             print(f"- {item['file']}: {item['reason']}")
     if result["skipped"]:
         print("略過範例：")

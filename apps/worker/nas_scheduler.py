@@ -20,6 +20,7 @@ ZONE = ZoneInfo("Asia/Taipei")
 STATE_FILE = LOGS_DIR / "nas_scheduler.json"
 HEARTBEAT_FILE = LOGS_DIR / "nas_scheduler_heartbeat.json"
 BROKER_STATE_FILE = LOGS_DIR / "nas_broker_import.json"
+BROKER_LOG_DIR = LOGS_DIR / "broker_import"
 EVENT_STATE_FILE = LOGS_DIR / "nas_company_events.json"
 BROKER_DOWNLOAD_LOCK = RAW_DATA_DIR / "broker" / "twse" / ".download.lock"
 
@@ -52,7 +53,7 @@ def _write_json(path: Path, payload: dict) -> None:
     temporary.replace(path)
 
 
-def _run_with_heartbeat(args: list[str], *, timeout: int) -> int:
+def _run_with_heartbeat(args: list[str], *, timeout: int, log_path: Path | None = None) -> int:
     stop = threading.Event()
 
     def heartbeat() -> None:
@@ -64,7 +65,11 @@ def _run_with_heartbeat(args: list[str], *, timeout: int) -> int:
     thread = threading.Thread(target=heartbeat, daemon=True)
     thread.start()
     try:
-        return subprocess.run(args, check=False, timeout=timeout).returncode
+        if log_path is None:
+            return subprocess.run(args, check=False, timeout=timeout).returncode
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a", encoding="utf-8") as log:
+            return subprocess.run(args, check=False, timeout=timeout, stdout=log, stderr=subprocess.STDOUT).returncode
     except subprocess.TimeoutExpired:
         return 124
     finally:
@@ -99,10 +104,11 @@ def _run_broker_import(now: datetime) -> bool:
             return False
         try:
             today = now.date().isoformat()
-            _write_json(BROKER_STATE_FILE, {"last_attempt": today, "started_at": now.isoformat(), "status": "running"})
+            log_path = BROKER_LOG_DIR / f"import_{today}.log"
+            _write_json(BROKER_STATE_FILE, {"last_attempt": today, "started_at": now.isoformat(), "status": "running", "log": str(log_path)})
             args = [sys.executable, "-m", "apps.worker.import_broker_csv_folder", "--missing-only", "--progress-every", "100"]
             print(f"NAS broker CSV import started: {today}", flush=True)
-            exit_code = _run_with_heartbeat(args, timeout=4 * 3600)
+            exit_code = _run_with_heartbeat(args, timeout=4 * 3600, log_path=log_path)
             status = "ok" if exit_code == 0 else "timeout" if exit_code == 124 else "failed"
             _write_json(BROKER_STATE_FILE, {
                 "last_attempt": today,
@@ -110,6 +116,7 @@ def _run_broker_import(now: datetime) -> bool:
                 "status": status,
                 "exit_code": exit_code,
                 "command": args,
+                "log": str(log_path),
             })
             print(f"NAS broker CSV import finished: {today} {status} exit={exit_code}", flush=True)
             return True

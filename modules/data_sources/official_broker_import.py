@@ -29,7 +29,10 @@ HEADER_ALIASES = {
 
 
 def _get_connection():
-    conn = sqlite3.connect(DB_PATH)
+    # NAS broker overview queries can hold a read transaction for tens of seconds
+    # while the daily importer is writing. Wait for the reader to finish instead
+    # of dropping an otherwise valid CSV report after SQLite's 5-second default.
+    conn = sqlite3.connect(DB_PATH, timeout=60)
     conn.row_factory = sqlite3.Row
     return conn
 
