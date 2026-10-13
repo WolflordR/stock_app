@@ -10,6 +10,7 @@ services:
       TRADE_RAW_DATA_DIR: /trade/data/raw
       TRADE_LOGS_DIR: /trade/logs
       BROKER_DAILY_TIME: ${BROKER_DAILY_TIME:-19:00}
+      BROKER_RETRY_TIME: ${BROKER_RETRY_TIME:-22:00}
       TZ: Asia/Taipei
       OMP_NUM_THREADS: "1"
       OPENBLAS_NUM_THREADS: "1"

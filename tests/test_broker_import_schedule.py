@@ -3,6 +3,7 @@ from __future__ import annotations
 import fcntl
 import json
 import sqlite3
+import subprocess
 import sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -10,6 +11,7 @@ from zoneinfo import ZoneInfo
 from apps.worker import nas_scheduler
 from apps.worker import import_broker_csv_folder as broker_import_worker
 from apps.worker.import_broker_csv_folder import import_broker_csv_folder
+from broker_scraper import scheduler as broker_download_scheduler
 from modules.data_sources import official_broker_import
 
 
@@ -92,3 +94,50 @@ def test_broker_import_retries_a_temporary_sqlite_lock(tmp_path, monkeypatch):
     assert calls == 2
     assert result["imported_count"] == 1
     assert result["failed_count"] == 0
+
+
+def test_late_import_follows_download_retry(tmp_path, monkeypatch):
+    now = datetime(2026, 10, 13, 23, 15, tzinfo=ZoneInfo("Asia/Taipei"))
+    state = {"last_attempt": "2026-10-13", "status": "ok"}
+    assert nas_scheduler._broker_import_slot(now, state, primary_time=(21, 0), late_time=(23, 15)) == "late"
+    monkeypatch.setattr(nas_scheduler, "BROKER_DOWNLOAD_LOCK", tmp_path / ".download.lock")
+    monkeypatch.setattr(nas_scheduler, "BROKER_STATE_FILE", tmp_path / "broker_state.json")
+    monkeypatch.setattr(nas_scheduler, "BROKER_LOG_DIR", tmp_path / "broker_import")
+    (tmp_path / "broker_state.json").write_text(json.dumps(state), encoding="utf-8")
+    monkeypatch.setattr(nas_scheduler, "_run_with_heartbeat", lambda args, **kwargs: 0)
+    assert nas_scheduler._run_broker_import(now, slot="late")
+    updated = json.loads((tmp_path / "broker_state.json").read_text(encoding="utf-8"))
+    assert updated["last_late_attempt"] == "2026-10-13"
+    assert nas_scheduler._broker_import_slot(now, updated, primary_time=(21, 0), late_time=(23, 15)) is None
+
+
+def test_failed_download_gets_one_evening_retry():
+    zone = ZoneInfo("Asia/Taipei")
+    state = {"last_attempt": "2026-10-13", "status": "failed", "attempt_count": 1}
+    due = lambda hour, minute, current: broker_download_scheduler._is_due(
+        datetime(2026, 10, 13, hour, minute, tzinfo=zone),
+        current,
+        daily_time=(19, 0),
+        retry_time=(22, 0),
+    )
+    assert not due(21, 59, state)
+    assert due(22, 0, state)
+    assert not due(22, 30, {**state, "attempt_count": 2})
+    assert not due(22, 30, {**state, "status": "ok"})
+
+
+def test_legacy_failed_download_state_only_retries_once(tmp_path, monkeypatch):
+    state_path = tmp_path / "scheduler.json"
+    state_path.write_text(json.dumps({"last_attempt": "2026-10-13", "status": "failed"}), encoding="utf-8")
+    monkeypatch.setattr(broker_download_scheduler, "STATE_FILE", state_path)
+    monkeypatch.setattr(broker_download_scheduler, "LOG_DIR", tmp_path)
+    monkeypatch.setattr(
+        broker_download_scheduler.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 1),
+    )
+    now = datetime(2026, 10, 13, 22, 0, tzinfo=ZoneInfo("Asia/Taipei"))
+    assert broker_download_scheduler.run_once(now) == 1
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state["attempt_count"] == 2
+    assert not broker_download_scheduler._is_due(now, state, daily_time=(19, 0), retry_time=(22, 0))

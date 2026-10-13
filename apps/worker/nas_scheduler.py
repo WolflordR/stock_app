@@ -94,7 +94,7 @@ def _run_once(now: datetime) -> None:
     print(f"NAS daily update finished: {today} {status} exit={exit_code}", flush=True)
 
 
-def _run_broker_import(now: datetime) -> bool:
+def _run_broker_import(now: datetime, *, slot: str = "primary") -> bool:
     """Import downloaded reports after the scraper releases its file lock."""
     BROKER_DOWNLOAD_LOCK.parent.mkdir(parents=True, exist_ok=True)
     with BROKER_DOWNLOAD_LOCK.open("a+") as lock_file:
@@ -104,21 +104,25 @@ def _run_broker_import(now: datetime) -> bool:
             return False
         try:
             today = now.date().isoformat()
-            log_path = BROKER_LOG_DIR / f"import_{today}.log"
-            _write_json(BROKER_STATE_FILE, {"last_attempt": today, "started_at": now.isoformat(), "status": "running", "log": str(log_path)})
+            previous = _read_broker_state()
+            log_path = BROKER_LOG_DIR / f"import_{today}_{slot}.log"
+            state = {**previous, "last_attempt": today, "started_at": now.isoformat(), "status": "running", "log": str(log_path)}
+            if slot == "late":
+                state["last_late_attempt"] = today
+            _write_json(BROKER_STATE_FILE, state)
             args = [sys.executable, "-m", "apps.worker.import_broker_csv_folder", "--missing-only", "--progress-every", "100"]
-            print(f"NAS broker CSV import started: {today}", flush=True)
+            print(f"NAS broker CSV import started: {today} {slot}", flush=True)
             exit_code = _run_with_heartbeat(args, timeout=4 * 3600, log_path=log_path)
             status = "ok" if exit_code == 0 else "timeout" if exit_code == 124 else "failed"
             _write_json(BROKER_STATE_FILE, {
-                "last_attempt": today,
+                **state,
                 "finished_at": datetime.now(ZONE).isoformat(),
                 "status": status,
                 "exit_code": exit_code,
                 "command": args,
                 "log": str(log_path),
             })
-            print(f"NAS broker CSV import finished: {today} {status} exit={exit_code}", flush=True)
+            print(f"NAS broker CSV import finished: {today} {slot} {status} exit={exit_code}", flush=True)
             return True
         finally:
             fcntl.flock(lock_file, fcntl.LOCK_UN)
@@ -148,6 +152,21 @@ def _is_due(now: datetime, *, hour: int, minute: int, last_attempt: str | None) 
     )
 
 
+def _broker_import_slot(
+    now: datetime,
+    state: dict,
+    *,
+    primary_time: tuple[int, int],
+    late_time: tuple[int, int],
+) -> str | None:
+    today = now.date().isoformat()
+    if (now.hour, now.minute) >= primary_time and state.get("last_attempt") != today:
+        return "primary"
+    if state.get("last_attempt") == today and (now.hour, now.minute) >= late_time and state.get("last_late_attempt") != today:
+        return "late"
+    return None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--health", action="store_true")
@@ -163,9 +182,10 @@ def main() -> int:
     event_hour, event_minute = map(int, os.getenv("TRADE_EVENTS_TIME", "08:30").split(":"))
     evening_hour, evening_minute = map(int, os.getenv("TRADE_EVENTS_EVENING_TIME", "20:30").split(":"))
     broker_hour, broker_minute = map(int, os.getenv("TRADE_BROKER_IMPORT_TIME", "21:00").split(":"))
-    if not all(0 <= h <= 23 and 0 <= m <= 59 for h, m in ((hour, minute), (event_hour, event_minute), (evening_hour, evening_minute), (broker_hour, broker_minute))):
+    late_hour, late_minute = map(int, os.getenv("TRADE_BROKER_IMPORT_LATE_TIME", "23:15").split(":"))
+    if not all(0 <= h <= 23 and 0 <= m <= 59 for h, m in ((hour, minute), (event_hour, event_minute), (evening_hour, evening_minute), (broker_hour, broker_minute), (late_hour, late_minute))):
         raise ValueError("Scheduler times must be HH:MM")
-    print(f"NAS scheduler ready; daily data weekdays {hour:02d}:{minute:02d}, company events daily {event_hour:02d}:{event_minute:02d} and {evening_hour:02d}:{evening_minute:02d}, broker import daily {broker_hour:02d}:{broker_minute:02d} Asia/Taipei", flush=True)
+    print(f"NAS scheduler ready; daily data weekdays {hour:02d}:{minute:02d}, company events daily {event_hour:02d}:{event_minute:02d} and {evening_hour:02d}:{evening_minute:02d}, broker import daily {broker_hour:02d}:{broker_minute:02d} and {late_hour:02d}:{late_minute:02d} Asia/Taipei", flush=True)
     while True:
         now = datetime.now(ZONE)
         _write_json(HEARTBEAT_FILE, {"epoch": time.time(), "at": now.isoformat()})
@@ -177,8 +197,14 @@ def main() -> int:
                 _run_event_refresh(now, "evening")
         elif (now.hour, now.minute) >= (event_hour, event_minute) and event_state.get("last_morning_attempt") != now.date().isoformat():
             _run_event_refresh(now, "morning")
-        if (now.hour, now.minute) >= (broker_hour, broker_minute) and _read_broker_state().get("last_attempt") != now.date().isoformat():
-            _run_broker_import(now)
+        broker_slot = _broker_import_slot(
+            now,
+            _read_broker_state(),
+            primary_time=(broker_hour, broker_minute),
+            late_time=(late_hour, late_minute),
+        )
+        if broker_slot:
+            _run_broker_import(now, slot=broker_slot)
         time.sleep(30)
 
 
