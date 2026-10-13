@@ -350,8 +350,8 @@ export function fetchBrokerBranches(searchText = ""): Promise<BrokerBranch[]> {
   return requestJson<BrokerBranch[]>(`/api/broker/branches?${params.toString()}`);
 }
 
-export function fetchRevenueMomentum(limit = 30): Promise<RevenueMomentum> {
-  return requestJson<RevenueMomentum>(`/api/revenue/momentum?limit=${limit}`);
+export function fetchRevenueMomentum(limit = 30, offset = 0): Promise<RevenueMomentum> {
+  return requestJson<RevenueMomentum>(`/api/revenue/momentum?limit=${limit}&offset=${offset}`);
 }
 
 export function fetchUsMarketCalendar(startDate: string, endDate: string, importance = "all"): Promise<UsMarketCalendar> {

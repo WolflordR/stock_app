@@ -580,8 +580,11 @@ if app is not None:
         return list_broker_branches(search_text=search_text, limit=limit)
 
     @app.get("/api/revenue/momentum")
-    def revenue_momentum(limit: int = Query(default=30, ge=1, le=100)) -> dict[str, object]:
-        return list_revenue_momentum(limit=limit)
+    def revenue_momentum(
+        limit: int = Query(default=30, ge=1, le=100),
+        offset: int = Query(default=0, ge=0),
+    ) -> dict[str, object]:
+        return list_revenue_momentum(limit=limit, offset=offset)
 
     @app.get("/api/us-market/calendar")
     def us_market_calendar(

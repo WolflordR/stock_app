@@ -518,8 +518,9 @@ def list_strong_stocks(days: int = 7, limit: int = 10) -> dict[str, Any]:
     )
 
 
-def list_revenue_momentum(limit: int = 30) -> dict[str, Any]:
+def list_revenue_momentum(limit: int = 30, offset: int = 0) -> dict[str, Any]:
     normalized_limit = max(1, min(int(limit), 100))
+    normalized_offset = max(0, int(offset))
     lookback_months = 6
     with _connect_db("revenue_cache.db") as conn:
         latest = conn.execute("SELECT MAX(report_month) AS report_month FROM monthly_revenue").fetchone()
@@ -562,7 +563,7 @@ def list_revenue_momentum(limit: int = 30) -> dict[str, Any]:
             used_months,
         ).fetchall()
     all_ranked_rows = _build_revenue_trend_rows(_rows_to_dicts(rows), used_months)
-    ranked_rows = all_ranked_rows[:normalized_limit]
+    ranked_rows = all_ranked_rows[normalized_offset : normalized_offset + normalized_limit]
     return _json_safe({
         "report_month": report_month,
         "rows": ranked_rows,
@@ -573,6 +574,7 @@ def list_revenue_momentum(limit: int = 30) -> dict[str, Any]:
             "candidate_count": len({(row["market"], row["code"]) for row in rows}),
             "qualified_count": len(all_ranked_rows),
             "returned_count": len(ranked_rows),
+            "offset": normalized_offset,
         },
     })
 

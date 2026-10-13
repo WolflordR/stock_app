@@ -1821,9 +1821,11 @@ h1 {
 }
 
 .stock-revenue-controls button {
-  display: inline-grid;
-  place-items: center;
-  width: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 9px;
   height: 30px;
   border: 1px solid rgba(236, 241, 244, 0.12);
   border-radius: 8px;

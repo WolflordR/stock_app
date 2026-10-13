@@ -253,6 +253,7 @@ const migrationSteps = [
 ];
 
 const emptyQuotes: StockOverview["quotes"] = [];
+const revenuePageSize = 10;
 const defaultUsCalendarStart = formatInputDate(new Date());
 const defaultUsCalendarEnd = formatInputDate(addDays(new Date(), 30));
 
@@ -301,6 +302,8 @@ export function App() {
   const [brokerBranches, setBrokerBranches] = useState<BrokerBranch[]>([]);
 
   const [revenueMomentum, setRevenueMomentum] = useState<RevenueMomentum | null>(null);
+  const [revenuePage, setRevenuePage] = useState(0);
+  const [revenueLoading, setRevenueLoading] = useState(false);
   const [usCalendar, setUsCalendar] = useState<UsMarketCalendar | null>(null);
   const [usCalendarStart, setUsCalendarStart] = useState(defaultUsCalendarStart);
   const [usCalendarEnd, setUsCalendarEnd] = useState(defaultUsCalendarEnd);
@@ -593,11 +596,12 @@ export function App() {
     setFeatureError("");
     try {
       const [nextRevenue, nextEtfs, nextBacktestConfig] = await Promise.all([
-        fetchRevenueMomentum(30),
+        fetchRevenueMomentum(revenuePageSize),
         fetchActiveEtfSnapshots(500, 30),
         fetchBacktestConfig(),
       ]);
       setRevenueMomentum(nextRevenue);
+      setRevenuePage(0);
       setActiveEtfSnapshots(nextEtfs);
       setBacktestConfig(nextBacktestConfig);
       const nextEtfCode = selectedEtfCode || nextEtfs.rows[0]?.etf_code || "";
@@ -610,6 +614,21 @@ export function App() {
       setActiveEtfChanges(nextEtfCode ? await fetchActiveEtfChanges(nextEtfCode, nextEtfSnapshotDate) : null);
     } catch (error) {
       setFeatureError(error instanceof Error ? error.message : "Feature data failed");
+    }
+  }
+
+  async function loadRevenuePage(nextPage: number) {
+    if (nextPage < 0 || revenueLoading) return;
+    setRevenueLoading(true);
+    setFeatureError("");
+    try {
+      const result = await fetchRevenueMomentum(revenuePageSize, nextPage * revenuePageSize);
+      setRevenueMomentum(result);
+      setRevenuePage(nextPage);
+    } catch (error) {
+      setFeatureError(error instanceof Error ? error.message : "月營收排行讀取失敗");
+    } finally {
+      setRevenueLoading(false);
     }
   }
 
@@ -992,6 +1011,9 @@ export function App() {
         {activeView === "revenue" ? (
           <RevenueView
             revenueMomentum={revenueMomentum}
+            page={revenuePage}
+            loading={revenueLoading}
+            onPageChange={(nextPage) => void loadRevenuePage(nextPage)}
             onStockSelect={(code) => {
               openStockDetail(code);
             }}
@@ -1486,16 +1508,16 @@ function StockView({
 
 function MonthlyRevenueTable({ rows }: { rows: StockOverview["monthly_revenue"] }) {
   const pageSize = 12;
-  const [startIndex, setStartIndex] = useState(0);
-  const maxStartIndex = Math.max(0, rows.length - pageSize);
-  const effectiveStartIndex = Math.min(startIndex, maxStartIndex);
-  const visibleRows = rows.slice(effectiveStartIndex, effectiveStartIndex + pageSize);
+  const [page, setPage] = useState(0);
+  const pageCount = Math.ceil(rows.length / pageSize);
+  const currentPage = Math.min(page, Math.max(0, pageCount - 1));
+  const visibleRows = rows.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
   const periodLabel = visibleRows.length
     ? `${visibleRows[visibleRows.length - 1]?.report_month} 到 ${visibleRows[0]?.report_month}`
     : "尚無月份";
 
   useEffect(() => {
-    setStartIndex(0);
+    setPage(0);
   }, [rows]);
 
   const chartRows = [...visibleRows].reverse();
@@ -1508,19 +1530,19 @@ function MonthlyRevenueTable({ rows }: { rows: StockOverview["monthly_revenue"] 
             type="button"
             aria-label="較新月份"
             title="較新月份"
-            onClick={() => setStartIndex((current) => Math.max(0, current - pageSize))}
-            disabled={effectiveStartIndex === 0}
+            onClick={() => setPage((current) => Math.max(0, current - 1))}
+            disabled={currentPage === 0}
           >
-            <ChevronLeft size={16} />
+            <ChevronLeft size={16} />上一個
           </button>
           <button
             type="button"
             aria-label="較舊月份"
             title="較舊月份"
-            onClick={() => setStartIndex((current) => Math.min(maxStartIndex, current + pageSize))}
-            disabled={effectiveStartIndex >= maxStartIndex}
+            onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))}
+            disabled={currentPage >= pageCount - 1}
           >
-            <ChevronRight size={16} />
+            下一個<ChevronRight size={16} />
           </button>
         </div>
       </div>
@@ -1948,18 +1970,27 @@ function BrokerView({
 
 function RevenueView({
   revenueMomentum,
+  page,
+  loading,
+  onPageChange,
   onStockSelect
 }: {
   revenueMomentum: RevenueMomentum | null;
+  page: number;
+  loading: boolean;
+  onPageChange: (page: number) => void;
   onStockSelect: (code: string) => void;
 }) {
   const rows = revenueMomentum?.rows ?? [];
   const usedMonths = revenueMomentum?.summary?.used_months ?? [];
+  const total = revenueMomentum?.summary?.qualified_count ?? rows.length;
+  const pageCount = Math.ceil(total / revenuePageSize);
+  const currentPage = Math.min(page, Math.max(0, pageCount - 1));
   return (
     <>
       <section className="status-grid">
         <MetricCard icon={<TrendingUp size={20} />} label="營收月份" value={revenueMomentum?.report_month ?? "-"} />
-        <MetricCard icon={<Database size={20} />} label="近 6 月排行" value={String(rows.length)} meta={usedMonths.length ? `${usedMonths[0]} 到 ${usedMonths[usedMonths.length - 1]}` : "近 6 個月"} />
+        <MetricCard icon={<Database size={20} />} label="近 6 月排行" value={String(total)} meta={usedMonths.length ? `${usedMonths[0]} 到 ${usedMonths[usedMonths.length - 1]}` : "近 6 個月"} />
         <MetricCard icon={<ShieldCheck size={20} />} label="判斷方式" value="成長加速度" meta="成長比例慢慢拉高" />
       </section>
       <section className="data-panel wide-panel">
@@ -1968,30 +1999,37 @@ function RevenueView({
           <h2>月營收動能排行</h2>
         </div>
         {rows.length ? (
-          <div className="dense-table revenue-table">
-            <div className="dense-row table-header" aria-hidden="true">
-              <span>公司</span>
-              <span>代號</span>
-              <span>產業</span>
-              <span>營收趨勢</span>
-              <span>分數</span>
-              <span>期間成長</span>
-              <span>加速度</span>
-              <span>加速段</span>
+          <>
+            <div className="dense-table revenue-table">
+              <div className="dense-row table-header" aria-hidden="true">
+                <span>公司</span>
+                <span>代號</span>
+                <span>產業</span>
+                <span>營收趨勢</span>
+                <span>分數</span>
+                <span>期間成長</span>
+                <span>加速度</span>
+                <span>加速段</span>
+              </div>
+              {rows.map((row) => (
+                <button className="dense-row" type="button" key={`${row.report_month}-${row.code}`} onClick={() => onStockSelect(row.code)}>
+                  <strong>{row.name_zh}</strong>
+                  <span>{row.code}</span>
+                  <span>{row.industry ?? "-"}</span>
+                  <Sparkline values={(row.revenue_history ?? []).map((point) => Number(point.current_revenue ?? 0)).filter((value) => value > 0)} rising={(row.slope_pct ?? 0) >= 0} />
+                  <em>{formatScore(row.trend_score)}</em>
+                  <em className={toneClass(row.trend_growth_pct)}>{formatPct(row.trend_growth_pct)}</em>
+                  <em className={toneClass(row.growth_acceleration_pct)}>{formatPct(row.growth_acceleration_pct)}</em>
+                  <em>{formatStepCount(row.accelerating_step_count, row.growth_rates?.length)}</em>
+                </button>
+              ))}
             </div>
-            {rows.map((row) => (
-              <button className="dense-row" type="button" key={`${row.report_month}-${row.code}`} onClick={() => onStockSelect(row.code)}>
-                <strong>{row.name_zh}</strong>
-                <span>{row.code}</span>
-                <span>{row.industry ?? "-"}</span>
-                <Sparkline values={(row.revenue_history ?? []).map((point) => Number(point.current_revenue ?? 0)).filter((value) => value > 0)} rising={(row.slope_pct ?? 0) >= 0} />
-                <em>{formatScore(row.trend_score)}</em>
-                <em className={toneClass(row.trend_growth_pct)}>{formatPct(row.trend_growth_pct)}</em>
-                <em className={toneClass(row.growth_acceleration_pct)}>{formatPct(row.growth_acceleration_pct)}</em>
-                <em>{formatStepCount(row.accelerating_step_count, row.growth_rates?.length)}</em>
-              </button>
-            ))}
-          </div>
+            <div className="home-page-nav" aria-label="月營收排行切換">
+              <span>{currentPage * revenuePageSize + 1}–{currentPage * revenuePageSize + rows.length} / {total}</span>
+              <button type="button" onClick={() => onPageChange(currentPage - 1)} disabled={loading || currentPage === 0}>上一個</button>
+              <button type="button" onClick={() => onPageChange(currentPage + 1)} disabled={loading || currentPage >= pageCount - 1}>下一個</button>
+            </div>
+          </>
         ) : (
           <p className="muted">目前沒有符合趨勢條件的月營收資料。之後 worker 補更多月份後，這裡會更準。</p>
         )}

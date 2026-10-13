@@ -456,6 +456,7 @@ export type RevenueMomentum = {
     candidate_count?: number;
     qualified_count?: number;
     returned_count?: number;
+    offset?: number;
   };
   rows: RevenueMomentumRow[];
 };
