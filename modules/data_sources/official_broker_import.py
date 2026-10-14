@@ -505,9 +505,11 @@ def get_official_broker_db_overview(*, market: str | None = None) -> dict[str, A
                 """
                 SELECT COUNT(DISTINCT broker_name) AS branch_count
                 FROM broker_trade_lines
-                WHERE market = ?
+                WHERE market = ? AND trade_date = (
+                    SELECT MAX(trade_date) FROM broker_trade_reports WHERE market = ?
+                )
                 """,
-                (market_filter,),
+                (market_filter, market_filter),
             ).fetchone()
         else:
             report_row = conn.execute(
@@ -522,8 +524,13 @@ def get_official_broker_db_overview(*, market: str | None = None) -> dict[str, A
             ).fetchone()
             branch_row = conn.execute(
                 """
-                SELECT COUNT(DISTINCT broker_name) AS branch_count
-                FROM broker_trade_lines
+                SELECT COUNT(DISTINCT lines.broker_name) AS branch_count
+                FROM (
+                    SELECT market, MAX(trade_date) AS trade_date
+                    FROM broker_trade_reports GROUP BY market
+                ) AS latest
+                CROSS JOIN broker_trade_lines AS lines
+                WHERE lines.market = latest.market AND lines.trade_date = latest.trade_date
                 """
             ).fetchone()
 
@@ -545,20 +552,30 @@ def list_official_broker_branches(
     init_official_broker_db()
     market_filter = _normalize_market_filter(market)
     search_value = f"%{str(search_text or '').strip()}%"
+    # The line table can be several GB on NAS. The existing (market, trade_date,
+    # stock_code) index makes the newest imported day cheap to read, while a
+    # lifetime GROUP BY scans every execution and stalls the broker page.
     query = """
+        WITH latest AS (
+            SELECT market, MAX(trade_date) AS trade_date
+            FROM broker_trade_reports
+            WHERE (? IS NULL OR market = ?)
+            GROUP BY market
+        )
         SELECT
-            broker_name,
-            COUNT(DISTINCT trade_date) AS trade_days,
-            COUNT(DISTINCT stock_code) AS stock_count,
-            MAX(trade_date) AS last_trade_date,
-            SUM(buy_shares) AS total_buy_shares,
-            SUM(sell_shares) AS total_sell_shares,
-            SUM(buy_shares) - SUM(sell_shares) AS total_net_shares
-        FROM broker_trade_lines
-        WHERE broker_name != ''
-          AND (? IS NULL OR market = ?)
-          AND (? = '%%' OR broker_name LIKE ?)
-        GROUP BY broker_name
+            lines.broker_name,
+            COUNT(DISTINCT lines.trade_date) AS trade_days,
+            COUNT(DISTINCT lines.stock_code) AS stock_count,
+            MAX(lines.trade_date) AS last_trade_date,
+            SUM(lines.buy_shares) AS total_buy_shares,
+            SUM(lines.sell_shares) AS total_sell_shares,
+            SUM(lines.buy_shares) - SUM(lines.sell_shares) AS total_net_shares
+        FROM latest
+        CROSS JOIN broker_trade_lines AS lines
+        WHERE lines.market = latest.market AND lines.trade_date = latest.trade_date
+          AND lines.broker_name != ''
+          AND (? = '%%' OR lines.broker_name LIKE ?)
+        GROUP BY lines.broker_name
         ORDER BY ABS(total_net_shares) DESC, last_trade_date DESC, broker_name ASC
         LIMIT ?
     """

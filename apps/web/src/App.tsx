@@ -1967,7 +1967,7 @@ function BrokerView({
           <Search size={20} />
           <h2>券商分點列表</h2>
         </div>
-        <p className="broker-list-note">列表檔數與買賣超張數為已匯入日期的累計；點選分點後顯示該分點最後匯入交易日的逐檔明細。</p>
+        <p className="broker-list-note">列表檔數與買賣超張數依各市場最新匯入交易日統計；點選分點後顯示該分點該日的逐檔明細。</p>
         <form className="stock-search" onSubmit={onSearchSubmit}>
           <input value={brokerSearch} onChange={(event) => onSearchChange(event.target.value)} placeholder="搜尋券商分點" aria-label="Broker search" />
           <button type="submit">搜尋</button>
