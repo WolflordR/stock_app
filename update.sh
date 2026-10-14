@@ -15,7 +15,14 @@ case "$REF" in
 esac
 mkdir -p "$BASE_DIR/releases"
 ARCHIVE=$(mktemp "$BASE_DIR/releases/.download.XXXXXX")
-trap 'rm -f "$ARCHIVE"' EXIT
+SUDO_KEEPALIVE_PID=
+cleanup() {
+  if [ -n "$SUDO_KEEPALIVE_PID" ]; then
+    kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
+  fi
+  rm -f "$ARCHIVE"
+}
+trap cleanup EXIT
 curl -fLsS --retry 3 --max-time 180 \
   "https://github.com/WolflordR/stock_app/archive/refs/heads/$REF.tar.gz" -o "$ARCHIVE"
 SHORT=$(sha256sum "$ARCHIVE" | cut -c1-12)
@@ -41,10 +48,20 @@ rollback() {
 
 export COMPOSE_PARALLEL_LIMIT=1
 sudo -v
+# Backing up several GB of SQLite data can outlast sudo's credential timeout.
+# Refresh it in this same SSH terminal until the release finishes.
+(
+  while sleep 30; do
+    sudo -n -v >/dev/null 2>&1 || exit 0
+  done
+) &
+SUDO_KEEPALIVE_PID=$!
 new_compose config -q
 new_compose build api
 new_compose build web
 "$BASE_DIR/backup.sh" pre-update
+echo "Backup complete; checking sudo before switching the active release"
+sudo -v
 ln -sfn "$RELEASE" "$BASE_DIR/current"
 if ! new_compose up -d --no-build --remove-orphans; then
   rollback
