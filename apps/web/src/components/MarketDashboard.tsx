@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { fetchHomeDashboard, type HomeDashboard, type HomeEvent, type HomeIndustry, type HomeSignal } from "../api";
 import { MarketMarginCard } from "./ChipTrends";
 
-type Props = { onStockSelect: (code: string, sourceLabel: string, codes: string[]) => void; onIndustrySelect: (key: string) => void; refresh?: boolean };
+type Props = { onStockSelect: (code: string, sourceLabel: string, codes: string[]) => void; onIndustrySelect: (key: string) => void; onLimitSelect: (direction: "up" | "down") => void; refresh?: boolean };
 const INDUSTRY_PAGE_SIZE = 12;
 const SIGNAL_PAGE_SIZE = 20;
 const EVENT_PAGE_SIZE = 4;
@@ -62,7 +62,7 @@ function EventRows({ rows, onStockSelect }: { rows: HomeEvent[]; onStockSelect: 
   </details>)}</div>;
 }
 
-export function MarketDashboard({ onStockSelect, onIndustrySelect, refresh = false }: Props) {
+export function MarketDashboard({ onStockSelect, onIndustrySelect, onLimitSelect, refresh = false }: Props) {
   const [data, setData] = useState<HomeDashboard | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -127,7 +127,7 @@ export function MarketDashboard({ onStockSelect, onIndustrySelect, refresh = fal
         <div className="home-metric home-turnover-ratio"><small>大盤成交值量比 · {dateText(turnover?.trade_date)}</small><strong>{turnover?.ratio == null ? "—" : `${turnover.ratio.toFixed(2)}×`}</strong><div className="home-turnover-tabs" role="group" aria-label="成交值量比市場">{[["TWSE", "上市"], ["TPEx", "上櫃"], ["combined", "合計"]].map(([key, label]) => <button key={key} type="button" className={turnoverMarket === key ? "active" : ""} onClick={() => setTurnoverMarket(key as typeof turnoverMarket)}>{label}</button>)}</div><span>{turnover ? `當日 ${num(turnover.amount_twd / 1e8, 1)} 億 ÷ 前 5 日平均 ${turnover.average5_twd == null ? "—" : `${num(turnover.average5_twd / 1e8, 1)} 億`}` : "等待官方成交值更新"}</span><small>股票成交金額 · {turnoverMarket !== "TPEx" && <a href={turnover?.source_urls.TWSE || "https://www.twse.com.tw/zh/trading/historical/mi-index.html"} target="_blank" rel="noreferrer">上市來源</a>}{turnoverMarket === "combined" && " ＋ "}{turnoverMarket !== "TWSE" && <a href={turnover?.source_urls.TPEx || "https://www.tpex.org.tw/zh-tw/mainboard/trading/info/highlight.html"} target="_blank" rel="noreferrer">上櫃來源</a>}</small></div>
         <div className="home-metric"><small>台積電 2330 · {dateText(market.tsmc?.trade_date)}</small><strong>{num(market.tsmc?.price, 2)}</strong><span className={tone(market.tsmc?.change_pct)}>{pct(market.tsmc?.change_pct)}</span></div>
         <div className="home-metric"><small>上漲 / 下跌 · {dateText(breadth.date)}</small><strong><span className="up">{num(breadth.advancing)}</span> / <span className="down">{num(breadth.declining)}</span></strong><span>上漲比例 {pct(breadth.advance_pct, false)}</span></div>
-        <div className="home-metric"><small>股票漲停 / 跌停 · {dateText(limits?.date || twseLimits?.trade_date || tpexLimits?.trade_date)}</small><strong><span className="up">{num(limits?.limit_up_count)}</span> / <span className="down">{num(limits?.limit_down_count)}</span></strong><span>{twseLimits ? <a href={twseLimits.source_url} target="_blank" rel="noreferrer">上市 {num(twseLimits.limit_up_count)} / {num(twseLimits.limit_down_count)}</a> : "上市待更新"} · {tpexLimits ? <a href={tpexLimits.source_url} target="_blank" rel="noreferrer">上櫃 {num(tpexLimits.limit_up_count)} / {num(tpexLimits.limit_down_count)}</a> : "上櫃待更新"}{twseLimits && tpexLimits && !limits?.date ? "（日期不同，暫不合計）" : ""}</span></div>
+        <div className="home-metric"><small>股票漲停 / 跌停 · {dateText(limits?.date || twseLimits?.trade_date || tpexLimits?.trade_date)}</small><strong className="home-limit-actions"><button type="button" className="up" onClick={() => onLimitSelect("up")} aria-label="查看漲停股票清單">{num(limits?.limit_up_count)} <small>漲停</small></button><span>/</span><button type="button" className="down" onClick={() => onLimitSelect("down")} aria-label="查看跌停股票清單">{num(limits?.limit_down_count)} <small>跌停</small></button></strong><span>{twseLimits ? <a href={twseLimits.source_url} target="_blank" rel="noreferrer">上市 {num(twseLimits.limit_up_count)} / {num(twseLimits.limit_down_count)}</a> : "上市待更新"} · {tpexLimits ? <a href={tpexLimits.source_url} target="_blank" rel="noreferrer">上櫃 {num(tpexLimits.limit_up_count)} / {num(tpexLimits.limit_down_count)}</a> : "上櫃待更新"}{twseLimits && tpexLimits && !limits?.date ? "（日期不同，暫不合計）" : ""}</span></div>
       </div>
       <div className="home-breadth"><h3>Market Breadth</h3><div><span>站上 20MA <b>{pct(breadth.above_ma20_pct, false)}</b></span><span>站上 60MA <b>{pct(breadth.above_ma60_pct, false)}</b></span><span>20 日新高 <b>{num(breadth.new_high20)}</b></span><span>20 日新低 <b>{num(breadth.new_low20)}</b></span><span>觀測 <b>{num(breadth.observed)} 檔</b></span></div><small>{breadth.coverage_note}。</small></div>
     </Section>

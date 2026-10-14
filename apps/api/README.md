@@ -17,6 +17,7 @@ FastAPI 後端骨架。第一階段目標是 read-only API，讓正式網站透�
 - `GET /api/market-map/topics/{topic_name}/members`
 - `GET /api/broker/overview`
 - `GET /api/broker/branches`
+- `GET /api/broker/branch-stocks?broker_name=凱基台北&trade_date=2026-10-08&side=buy&sort_by=volume_ratio&descending=true&limit=50&offset=0` — one branch's daily net buy/sell stocks, weighted buy/sell execution prices, and same-date cached stock liquidity/price metrics. Supported `sort_by`: `net_shares`, `volume`, `turnover_value`, `volume_ratio`, `change_pct`.
 - `GET /api/dashboard/overview`
 
 之後再逐步加入：

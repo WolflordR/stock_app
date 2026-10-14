@@ -61,6 +61,40 @@ export type BrokerBranch = {
   total_net_shares: number;
 };
 
+export type BrokerBranchStock = {
+  stock_code: string;
+  stock_name: string;
+  market: string;
+  trade_date: string;
+  buy_shares: number;
+  sell_shares: number;
+  net_shares: number;
+  buy_amount: number | null;
+  sell_amount: number | null;
+  avg_buy_price: number | null;
+  avg_sell_price: number | null;
+  stock_volume_shares: number | null;
+  estimated_trade_value: number | null;
+  volume_ratio: number | null;
+  change_pct: number | null;
+};
+
+export type BrokerBranchStocks = {
+  broker_name: string;
+  market: string;
+  trade_date: string;
+  side: "buy" | "sell";
+  sort_by: "net_shares" | "volume" | "turnover_value" | "volume_ratio" | "change_pct";
+  descending: boolean;
+  total: number;
+  quoted_count: number;
+  limit: number;
+  offset: number;
+  rows: BrokerBranchStock[];
+  broker_source: string;
+  price_source: string;
+};
+
 export type DashboardOverview = {
   summary: {
     architecture: string;

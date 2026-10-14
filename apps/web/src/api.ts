@@ -9,6 +9,7 @@ import type {
   BacktestJobResponse,
   BootstrapJobsResponse,
   BrokerBranch,
+  BrokerBranchStocks,
   MarketMapGroup,
   MarketMapMember,
   MarketMapTopic,
@@ -55,6 +56,37 @@ export type HomeDashboard = {
 
 export function fetchHomeDashboard(refresh = false): Promise<HomeDashboard> {
   return requestJson<HomeDashboard>(refresh ? "/api/dashboard?refresh=true" : "/api/dashboard");
+}
+
+export type MarketLimitStock = {
+  market: "TWSE" | "TPEx";
+  trade_date: string;
+  stock_id: string;
+  name: string;
+  direction: "up" | "down";
+  close: number;
+  limit_price: number;
+  volume_shares: number;
+};
+export type MarketLimitListing = {
+  direction: "up" | "down";
+  market: "TWSE" | "TPEx" | "combined";
+  date: string | null;
+  official_count: number | null;
+  rows: MarketLimitStock[];
+  markets: Record<string, {
+    status: "complete" | "pending" | "no_summary";
+    date: string | null;
+    official_up?: number;
+    official_down?: number;
+    summary_source_url?: string;
+    limit_source_url?: string | null;
+    quote_source_url?: string | null;
+  }>;
+  complete: boolean;
+};
+export function fetchMarketLimitStocks(direction: "up" | "down", market: "TWSE" | "TPEx" | "combined"): Promise<MarketLimitListing> {
+  return requestJson<MarketLimitListing>(`/api/market/limits/stocks?direction=${direction}&market=${market}`);
 }
 
 export type MarginRow = { trade_date: string; market: string; margin_balance_lots: number; margin_previous_lots: number | null; margin_balance_thousand_twd?: number | null; margin_previous_thousand_twd?: number | null; margin_balance_yi_twd?: number | null; margin_change_yi_twd?: number | null; margin_5d_change_yi_twd?: number | null; margin_change_lots: number | null; margin_5d_change_lots?: number | null; margin_buy_lots?: number | null; margin_sell_lots?: number | null; short_balance_lots: number; short_previous_lots: number | null; short_change_lots: number | null; short_5d_change_lots?: number | null; short_sell_lots?: number | null; short_buy_lots?: number | null; short_to_margin_pct: number | null; ratio_5d_change_pp?: number | null; source_url: string | null };
@@ -348,6 +380,27 @@ export function fetchBrokerBranches(searchText = ""): Promise<BrokerBranch[]> {
   if (searchText.trim()) params.set("search_text", searchText.trim());
   params.set("limit", "80");
   return requestJson<BrokerBranch[]>(`/api/broker/branches?${params.toString()}`);
+}
+
+export function fetchBrokerBranchStocks(
+  brokerName: string,
+  tradeDate: string,
+  side: "buy" | "sell",
+  sortBy: BrokerBranchStocks["sort_by"],
+  descending: boolean,
+  offset: number,
+  limit = 50
+): Promise<BrokerBranchStocks> {
+  const params = new URLSearchParams({
+    broker_name: brokerName,
+    trade_date: tradeDate,
+    side,
+    sort_by: sortBy,
+    descending: String(descending),
+    offset: String(offset),
+    limit: String(limit)
+  });
+  return requestJson<BrokerBranchStocks>(`/api/broker/branch-stocks?${params.toString()}`);
 }
 
 export function fetchRevenueMomentum(limit = 30, offset = 0): Promise<RevenueMomentum> {

@@ -14,6 +14,7 @@ from modules.data_sources.chip_trends import refresh_margin_day, refresh_tdcc
 from modules.ownership_research.data import backfill_prices, sync_ownership_metadata
 from modules.ownership_research.official_evidence import fetch_action_month
 from modules.data_sources.market_limits import refresh_market_limits
+from modules.data_sources.market_limit_stocks import refresh_market_limit_details
 from modules.data_sources.market_turnover import refresh_turnover_recent
 from modules.data_sources.revenue_data import backfill_recent_monthly_revenue, refresh_monthly_revenue_snapshot
 from modules.data_sources.financial_eps import refresh_eps
@@ -69,7 +70,7 @@ def build_daily_steps(args: argparse.Namespace) -> list[WorkerStep]:
     enabled_steps.append("refresh_eps")
     enabled_steps.append("refresh_financial_history")
     if not args.skip_chip_trends:
-        enabled_steps.extend(["refresh_margin_short", "refresh_tdcc_ownership", "sync_ownership_research_metadata", "refresh_ownership_research_prices", "refresh_ownership_research_actions", "refresh_market_limits", "refresh_market_turnover"])
+        enabled_steps.extend(["refresh_margin_short", "refresh_tdcc_ownership", "sync_ownership_research_metadata", "refresh_ownership_research_prices", "refresh_ownership_research_actions", "refresh_market_limits", "refresh_market_limit_details", "refresh_market_turnover"])
     price_stock_ids = _resolve_price_stock_ids(args)
     if price_stock_ids:
         enabled_steps.append("update_price_cache")
@@ -117,6 +118,7 @@ def build_daily_steps(args: argparse.Namespace) -> list[WorkerStep]:
         WorkerStep("refresh_ownership_research_prices", lambda: backfill_prices(date.today() - timedelta(days=7), date.today(), max_days=8, delay_seconds=0.25), enabled=not args.skip_chip_trends),
         WorkerStep("refresh_ownership_research_actions", lambda: fetch_action_month(date.today()), enabled=not args.skip_chip_trends),
         WorkerStep("refresh_market_limits", refresh_market_limits, enabled=not args.skip_chip_trends),
+        WorkerStep("refresh_market_limit_details", refresh_market_limit_details, enabled=not args.skip_chip_trends),
         WorkerStep("refresh_market_turnover", refresh_turnover_recent, enabled=not args.skip_chip_trends),
     ]
 

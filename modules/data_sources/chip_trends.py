@@ -32,6 +32,7 @@ def connect(path: str | None = None) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript((PROJECT_ROOT / "migrations" / "20261009_chip_trends.sql").read_text(encoding="utf-8"))
+    conn.executescript((PROJECT_ROOT / "migrations" / "20261014_market_limit_stocks.sql").read_text(encoding="utf-8"))
     if "margin_previous_thousand_twd" not in {row[1] for row in conn.execute("PRAGMA table_info(market_margin_short_daily)")}:
         conn.execute("ALTER TABLE market_margin_short_daily ADD COLUMN margin_previous_thousand_twd INTEGER")
     return conn

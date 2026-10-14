@@ -47,9 +47,11 @@ from modules.backtest.backtest_models import BacktestScanRequest
 from modules.backtest.backtest_service import validate_backtest_request
 from modules.news.news_analysis import build_news_analysis_bundle
 from modules.data_sources.official_broker_import import get_official_broker_db_overview
+from modules.data_sources.broker_branch_stocks import list_broker_branch_stocks
 from modules.data_sources.financial_trends import get_stock_financial_trends
 from modules.data_sources.stock_db import find_security, get_securities_in_range, get_stock_db_status, search_securities
 from modules.data_sources.chip_trends import market_history, stock_margin_history, ownership_history
+from modules.data_sources.market_limit_stocks import list_market_limit_stocks
 from modules.etf.active_etf_watch import refresh_latest_active_etf_snapshots
 from modules.industry.electronics_universe import get_electronics_coverage, list_electronics, list_sectors, list_themes
 from modules.industry.sector_metrics import get_sector_ranking
@@ -579,6 +581,22 @@ if app is not None:
     ) -> list[dict[str, object]]:
         return list_broker_branches(search_text=search_text, limit=limit)
 
+    @app.get("/api/broker/branch-stocks")
+    def broker_branch_stocks(
+        broker_name: str = Query(min_length=1, max_length=80),
+        trade_date: date = Query(),
+        side: str = Query(default="buy", pattern="^(buy|sell)$"),
+        sort_by: str = Query(default="net_shares", pattern="^(net_shares|volume|turnover_value|volume_ratio|change_pct)$"),
+        descending: bool = Query(default=True),
+        limit: int = Query(default=50, ge=1, le=100),
+        offset: int = Query(default=0, ge=0),
+        market: str = Query(default="TWSE", pattern="^(TWSE|TPEx)$"),
+    ) -> dict[str, object]:
+        return list_broker_branch_stocks(
+            broker_name, trade_date.isoformat(), side=side, sort_by=sort_by,
+            descending=descending, limit=limit, offset=offset, market=market,
+        )
+
     @app.get("/api/revenue/momentum")
     def revenue_momentum(
         limit: int = Query(default=30, ge=1, le=100),
@@ -719,6 +737,13 @@ if app is not None:
         if refresh:
             _cached_market_dashboard.cache_clear()
         return _cached_market_dashboard(int(datetime.now().timestamp() // 300))
+
+    @app.get("/api/market/limits/stocks")
+    def market_limit_stocks(
+        direction: str = Query(pattern="^(up|down)$"),
+        market: str = Query(default="combined", pattern="^(TWSE|TPEx|combined)$"),
+    ) -> dict[str, object]:
+        return list_market_limit_stocks(direction=direction, market=market)
 
     @app.get("/api/chips/market/margin-short")
     def market_margin_short(market: str = Query(default="TWSE", pattern="^(TWSE|TPEx|combined)$"), days: int = Query(default=370, ge=7, le=730)) -> dict[str, object]:

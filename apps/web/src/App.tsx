@@ -63,6 +63,8 @@ import {
 import { CandlestickVolumeChart } from "./components/CandlestickVolumeChart";
 import { SectorRotationView } from "./components/SectorRotationView";
 import { MarketDashboard } from "./components/MarketDashboard";
+import { MarketLimitsView } from "./components/MarketLimitsView";
+import { BrokerBranchStocksView } from "./components/BrokerBranchStocksView";
 import { CompanyCalendar } from "./components/CompanyCalendar";
 import { StockOwnershipTrends } from "./components/ChipTrends";
 import { FinancialTrends } from "./components/FinancialTrends";
@@ -95,7 +97,7 @@ import type {
 } from "./types";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
-type ViewKey = "overview" | "stock" | "events" | "favorites" | "strong" | "data" | "market" | "rotation" | "broker" | "revenue" | "usCalendar" | "etf" | "backtest" | "news" | "research" | "system";
+type ViewKey = "overview" | "limitUp" | "limitDown" | "stock" | "events" | "favorites" | "strong" | "data" | "market" | "rotation" | "broker" | "brokerBranch" | "revenue" | "usCalendar" | "etf" | "backtest" | "news" | "research" | "system";
 type StockNavigation = {
   sourceLabel: string;
   codes: string[];
@@ -112,6 +114,7 @@ type ViewHistoryEntry = {
   scrollY: number;
   stockInput: string;
   stockNavigation: StockNavigation | null;
+  brokerBranch: BrokerBranch | null;
 };
 type BacktestTuningParams = {
   range_lookback_days: number;
@@ -259,6 +262,7 @@ const defaultUsCalendarEnd = formatInputDate(addDays(new Date(), 30));
 
 export function App() {
   const [activeView, setActiveView] = useState<ViewKey>("overview");
+  const [limitRefresh, setLimitRefresh] = useState(0);
   const [dashboardSector, setDashboardSector] = useState("");
   const [dashboardRefresh, setDashboardRefresh] = useState(0);
   const [eventRefresh, setEventRefresh] = useState(0);
@@ -300,6 +304,8 @@ export function App() {
 
   const [brokerSearch, setBrokerSearch] = useState("");
   const [brokerBranches, setBrokerBranches] = useState<BrokerBranch[]>([]);
+  const [selectedBrokerBranch, setSelectedBrokerBranch] = useState<BrokerBranch | null>(null);
+  const [brokerBranchRefresh, setBrokerBranchRefresh] = useState(0);
 
   const [revenueMomentum, setRevenueMomentum] = useState<RevenueMomentum | null>(null);
   const [revenuePage, setRevenuePage] = useState(0);
@@ -338,7 +344,8 @@ export function App() {
       view: activeView,
       scrollY: window.scrollY,
       stockInput,
-      stockNavigation
+      stockNavigation,
+      brokerBranch: selectedBrokerBranch
     }]);
     if (nextView === "rotation") setRotationVisited(true);
     if (nextView === "etf") void loadActiveEtfData();
@@ -356,6 +363,7 @@ export function App() {
     setViewHistory((history) => history.slice(0, -1));
     setStockInput(previous.stockInput);
     setStockNavigation(previous.stockNavigation);
+    setSelectedBrokerBranch(previous.brokerBranch);
     if (previous.view === "stock" && previous.stockInput !== stockInput) {
       void loadStock(previous.stockInput);
     }
@@ -875,7 +883,7 @@ export function App() {
               <h1>{viewTitle(activeView)}</h1>
             </div>
           </div>
-          <button className="icon-button" type="button" onClick={() => { if (activeView === "overview") setDashboardRefresh(value => value + 1); else if (activeView === "events") setEventRefresh(value => value + 1); else if (activeView === "stock") { setStockChipRefresh(value => value + 1); void loadStock(stockInput); } else void loadOverview(); }} aria-label="重新整理目前頁面">
+          <button className="icon-button" type="button" onClick={() => { if (activeView === "overview") setDashboardRefresh(value => value + 1); else if (activeView === "limitUp" || activeView === "limitDown") setLimitRefresh(value => value + 1); else if (activeView === "brokerBranch") setBrokerBranchRefresh(value => value + 1); else if (activeView === "events") setEventRefresh(value => value + 1); else if (activeView === "stock") { setStockChipRefresh(value => value + 1); void loadStock(stockInput); } else void loadOverview(); }} aria-label="重新整理目前頁面">
             <RefreshCw size={18} />
           </button>
         </header>
@@ -895,7 +903,11 @@ export function App() {
         ) : null}
 
         {activeView === "overview" ? (
-          <MarketDashboard key={dashboardRefresh} refresh={dashboardRefresh > 0} onStockSelect={(code, sourceLabel, codes) => openStockDetail(code, { sourceLabel, codes: uniqueCodes(codes) })} onIndustrySelect={(key) => { setDashboardSector(key); navigateToView("rotation"); }} />
+          <MarketDashboard key={dashboardRefresh} refresh={dashboardRefresh > 0} onStockSelect={(code, sourceLabel, codes) => openStockDetail(code, { sourceLabel, codes: uniqueCodes(codes) })} onIndustrySelect={(key) => { setDashboardSector(key); navigateToView("rotation"); }} onLimitSelect={(direction) => navigateToView(direction === "up" ? "limitUp" : "limitDown")} />
+        ) : null}
+
+        {activeView === "limitUp" || activeView === "limitDown" ? (
+          <MarketLimitsView key={`${activeView}-${limitRefresh}`} direction={activeView === "limitUp" ? "up" : "down"} onDirectionChange={(direction) => navigateToView(direction === "up" ? "limitUp" : "limitDown")} onStockSelect={(code, codes) => openStockDetail(code, { sourceLabel: activeView === "limitUp" ? "漲停清單" : "跌停清單", codes: uniqueCodes(codes) })} />
         ) : null}
 
         {activeView === "events" ? <CompanyCalendar key={eventRefresh} onStockSelect={(code, codes) => openStockDetail(code, { sourceLabel: "法說財報", codes })} /> : null}
@@ -1005,7 +1017,14 @@ export function App() {
             brokerBranches={brokerBranches}
             onSearchChange={setBrokerSearch}
             onSearchSubmit={handleBrokerSubmit}
+            onBranchSelect={(branch) => { setSelectedBrokerBranch(branch); navigateToView("brokerBranch"); }}
           />
+        ) : null}
+
+        {selectedBrokerBranch ? (
+          <div hidden={activeView !== "brokerBranch"}>
+            <BrokerBranchStocksView key={`${selectedBrokerBranch.broker_name}-${selectedBrokerBranch.last_trade_date}-${brokerBranchRefresh}`} branch={selectedBrokerBranch} onStockSelect={(code, codes) => openStockDetail(code, { sourceLabel: `${selectedBrokerBranch.broker_name}分點`, codes: uniqueCodes(codes) })} />
+          </div>
         ) : null}
 
         {activeView === "revenue" ? (
@@ -1926,13 +1945,15 @@ function BrokerView({
   brokerOverview,
   brokerBranches,
   onSearchChange,
-  onSearchSubmit
+  onSearchSubmit,
+  onBranchSelect
 }: {
   brokerSearch: string;
   brokerOverview: DashboardOverview["sections"]["broker"]["data"] | undefined;
   brokerBranches: BrokerBranch[];
   onSearchChange: (value: string) => void;
   onSearchSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onBranchSelect: (branch: BrokerBranch) => void;
 }) {
   return (
     <>
@@ -1946,6 +1967,7 @@ function BrokerView({
           <Search size={20} />
           <h2>券商分點列表</h2>
         </div>
+        <p className="broker-list-note">列表檔數與買賣超張數為已匯入日期的累計；點選分點後顯示該分點最後匯入交易日的逐檔明細。</p>
         <form className="stock-search" onSubmit={onSearchSubmit}>
           <input value={brokerSearch} onChange={(event) => onSearchChange(event.target.value)} placeholder="搜尋券商分點" aria-label="Broker search" />
           <button type="submit">搜尋</button>
@@ -1953,11 +1975,11 @@ function BrokerView({
         <div className="broker-list">
           {brokerBranches.length ? (
             brokerBranches.map((branch) => (
-              <div className="broker-list-row" key={branch.broker_name}>
+              <button className="broker-list-row broker-list-button" type="button" key={branch.broker_name} onClick={() => onBranchSelect(branch)} aria-label={`查看${branch.broker_name}買賣超股票`} title={`最後匯入交易日 ${branch.last_trade_date}`}>
                 <strong>{branch.broker_name}</strong>
                 <span>{branch.stock_count.toLocaleString()} 檔</span>
                 <em>{formatShares(branch.total_net_shares)}</em>
-              </div>
+              </button>
             ))
           ) : (
             <p className="muted">目前本地官方分點資料庫沒有可列出的分點。</p>
@@ -2991,6 +3013,8 @@ function StockIdentity({ stockOverview }: { stockOverview: StockOverview | null 
 function viewTitle(view: ViewKey) {
   return {
     overview: "Market Dashboard",
+    limitUp: "漲停股票",
+    limitDown: "跌停股票",
     stock: "個股詳頁",
     events: "法說會與財報日期",
     favorites: "最愛清單",
@@ -2999,6 +3023,7 @@ function viewTitle(view: ViewKey) {
     market: "產業地圖",
     rotation: "全電子股產業輪動",
     broker: "券商分點",
+    brokerBranch: "分點買賣超股票",
     revenue: "月營收動能",
     usCalendar: "美股數據行事曆",
     etf: "主動式 ETF",

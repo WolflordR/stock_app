@@ -1291,6 +1291,10 @@ h1 {
   background: rgba(255, 255, 255, 0.035);
 }
 
+.broker-list-button { width: 100%; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.broker-list-button:hover, .broker-list-button:focus-visible { border-color: rgba(111, 231, 197, 0.46); background: rgba(111, 231, 197, 0.07); }
+.broker-list-note { color: #9eabb2; font-size: .74rem; line-height: 1.5; margin: 0 0 12px; }
+
 .broker-list-row strong,
 .broker-list-row span,
 .broker-list-row em {
@@ -2834,6 +2838,25 @@ h1 {
 .home-metric small { color: #aeb8be; font-size: .7rem; }
 .home-metric strong { font-size: 1.25rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .home-metric > span { color: #aeb8be; font-size: .75rem; }
+.home-limit-actions { display: flex; align-items: center; gap: 8px; }
+.home-limit-actions > span { color: #7d898f; }
+.home-limit-actions button { display: inline-flex; align-items: baseline; gap: 4px; border: 1px solid currentColor; border-radius: 6px; padding: 4px 7px; background: rgba(255,255,255,.035); cursor: pointer; font: inherit; }
+.home-limit-actions button:hover, .home-limit-actions button:focus-visible { background: rgba(255,255,255,.1); outline-offset: 2px; }
+.home-limit-actions button small { color: inherit; font-size: .65rem; }
+.market-limit-toolbar { justify-content: flex-start; gap: 18px; }
+.market-limit-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 20px; margin: 4px 0 14px; color: #aeb8be; font-size: .8rem; }
+.market-limit-summary strong { font-size: 1.1rem; }
+.market-limit-table { min-width: 650px; }
+.market-limit-sources { display: grid; gap: 5px; margin-top: 15px; color: #aeb8be; font-size: .73rem; }
+.market-limit-sources a { color: #a7e9dc; }
+.broker-activity-toolbar { justify-content: flex-start; align-items: flex-start; flex-wrap: wrap; gap: 10px 22px; }
+.broker-sort-tabs { max-width: 100%; }
+.broker-activity-table { min-width: 1100px; }
+.broker-activity-table th, .broker-activity-table td { text-align: right; }
+.broker-activity-table th:first-child, .broker-activity-table td:first-child { text-align: left; position: sticky; left: 0; background: #191e22; z-index: 1; }
+.broker-activity-table tr:hover td:first-child { background: #252b2e; }
+.broker-activity-note { margin: 15px 0 0; color: #9eabb2; font-size: .7rem; line-height: 1.55; }
+.broker-mobile-hint { display: none; margin: 0 0 7px; color: #9eabb2; font-size: .7rem; }
 .home-turnover-ratio > span { line-height: 1.45; }
 .home-turnover-ratio a { color: #a7e9dc; }
 .home-turnover-tabs { display: flex; gap: 4px; flex-wrap: wrap; }
@@ -2911,7 +2934,7 @@ h1 {
 .home-skeleton { display: grid; gap: 16px; }.home-skeleton > div { height: 160px; border-radius: 8px; background: rgba(236,241,244,.06); animation: home-pulse 1.5s ease-in-out infinite alternate; }
 @keyframes home-pulse { to { opacity: .5; } }
 @media (max-width: 1300px) { .home-market-grid { grid-template-columns: repeat(3,minmax(0,1fr)); } }
-@media (max-width: 850px) { .home-two-columns { grid-template-columns: 1fr; }.home-market-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }.home-section { padding: 13px; }.home-toolbar, .home-meta { align-items: start; flex-direction: column; } }
+@media (max-width: 850px) { .home-two-columns { grid-template-columns: 1fr; }.home-market-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }.home-section { padding: 13px; }.home-toolbar, .home-meta { align-items: start; flex-direction: column; }.broker-mobile-hint { display: block; } }
 @media (max-width: 520px) { .home-market-grid { grid-template-columns: 1fr 1fr; }.home-metric strong { font-size: 1rem; }.home-section-head { flex-direction: column; }.home-event-date { min-width: 65px; }.home-event summary { flex-wrap: wrap; }.home-event-main { flex: 1 1 150px; }.home-event-detail { overflow-wrap: anywhere; } }
 .event-calendar-page { display: grid; gap: 14px; min-width: 0; }
 .event-calendar-intro,.event-calendar-summary,.event-calendar-controls,.event-calendar-list { border: 1px solid rgba(236,241,244,.1); border-radius: 8px; background: #191e22; }
