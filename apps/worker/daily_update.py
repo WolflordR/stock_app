@@ -47,44 +47,8 @@ def _refresh_revenue_with_history() -> dict[str, int]:
 
 
 def build_daily_steps(args: argparse.Namespace) -> list[WorkerStep]:
-    enabled_steps = ["backup", "dashboard_status"]
-    if args.refresh_stock_master:
-        enabled_steps.append("refresh_stock_master")
-    if args.refresh_revenue:
-        enabled_steps.append("refresh_revenue")
-    if args.refresh_company_links:
-        enabled_steps.append("refresh_company_links")
-    if args.refresh_market_map:
-        enabled_steps.append("refresh_market_map")
-    if not args.skip_electronic_universe:
-        enabled_steps.append("sync_electronic_universe")
-        enabled_steps.append("sync_fine_classification")
-        enabled_steps.extend(["refresh_official_company_evidence", "refresh_mops_business", "sync_classification_v4"])
-    if not args.skip_sector_metrics:
-        enabled_steps.append("refresh_official_electronics_prices")
-        enabled_steps.append("refresh_sector_metrics")
-        enabled_steps.extend(["refresh_rotation_benchmarks", "refresh_rotation_institutional", "refresh_rotation_v3"])
-    if not args.skip_active_etf:
-        enabled_steps.append("refresh_active_etf")
-    enabled_steps.extend(["refresh_company_events", "refresh_dashboard_signals"])
-    enabled_steps.append("refresh_eps")
-    enabled_steps.append("refresh_financial_history")
-    if not args.skip_chip_trends:
-        enabled_steps.extend(["refresh_margin_short", "refresh_tdcc_ownership", "sync_ownership_research_metadata", "refresh_ownership_research_prices", "refresh_ownership_research_actions", "refresh_market_limits", "refresh_market_limit_details", "refresh_market_turnover"])
     price_stock_ids = _resolve_price_stock_ids(args)
-    if price_stock_ids:
-        enabled_steps.append("update_price_cache")
-
-    if args.dry_run:
-        return [
-            WorkerStep(
-                "dry_run",
-                lambda: _dry_run_payload(enabled_steps),
-            )
-        ]
-
-    return [
-        WorkerStep("backup", lambda: backup_databases(label="daily")),
+    steps = [
         WorkerStep("dashboard_status", build_dashboard_overview_payload),
         WorkerStep("refresh_stock_master", refresh_stock_db, enabled=args.refresh_stock_master),
         WorkerStep("sync_electronic_universe", sync_electronics_universe, enabled=not args.skip_electronic_universe),
@@ -115,12 +79,16 @@ def build_daily_steps(args: argparse.Namespace) -> list[WorkerStep]:
         WorkerStep("refresh_margin_short", lambda: [refresh_margin_day(date.today() - timedelta(days=offset)) for offset in range(6, -1, -1) if (date.today() - timedelta(days=offset)).weekday() < 5], enabled=not args.skip_chip_trends),
         WorkerStep("refresh_tdcc_ownership", refresh_tdcc, enabled=not args.skip_chip_trends),
         WorkerStep("sync_ownership_research_metadata", sync_ownership_metadata, enabled=not args.skip_chip_trends),
-        WorkerStep("refresh_ownership_research_prices", lambda: backfill_prices(date.today() - timedelta(days=7), date.today(), max_days=8, delay_seconds=0.25), enabled=not args.skip_chip_trends),
-        WorkerStep("refresh_ownership_research_actions", lambda: fetch_action_month(date.today()), enabled=not args.skip_chip_trends),
         WorkerStep("refresh_market_limits", refresh_market_limits, enabled=not args.skip_chip_trends),
         WorkerStep("refresh_market_limit_details", refresh_market_limit_details, enabled=not args.skip_chip_trends),
         WorkerStep("refresh_market_turnover", refresh_turnover_recent, enabled=not args.skip_chip_trends),
+        WorkerStep("refresh_ownership_research_prices", lambda: backfill_prices(date.today() - timedelta(days=7), date.today(), max_days=8, delay_seconds=0.25), enabled=not args.skip_chip_trends),
+        WorkerStep("refresh_ownership_research_actions", lambda: fetch_action_month(date.today()), enabled=not args.skip_chip_trends),
+        WorkerStep("backup", lambda: backup_databases(label="daily")),
     ]
+    if args.dry_run:
+        return [WorkerStep("dry_run", lambda: _dry_run_payload([step.name for step in steps if step.enabled]))]
+    return steps
 
 
 def _resolve_price_stock_ids(args: argparse.Namespace) -> list[str]:

@@ -48,12 +48,12 @@ def _read_state_file(path: Path) -> dict:
 
 def _write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
     temporary.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     temporary.replace(path)
 
 
-def _run_with_heartbeat(args: list[str], *, timeout: int, log_path: Path | None = None) -> int:
+def _run_with_heartbeat(args: list[str], *, timeout: int, log_path: Path | None = None, write_heartbeat: bool = True) -> int:
     stop = threading.Event()
 
     def heartbeat() -> None:
@@ -62,8 +62,9 @@ def _run_with_heartbeat(args: list[str], *, timeout: int, log_path: Path | None 
             _write_json(HEARTBEAT_FILE, {"epoch": time.time(), "at": now.isoformat()})
             stop.wait(30)
 
-    thread = threading.Thread(target=heartbeat, daemon=True)
-    thread.start()
+    thread = threading.Thread(target=heartbeat, daemon=True) if write_heartbeat else None
+    if thread is not None:
+        thread.start()
     try:
         if log_path is None:
             return subprocess.run(args, check=False, timeout=timeout).returncode
@@ -74,18 +75,22 @@ def _run_with_heartbeat(args: list[str], *, timeout: int, log_path: Path | None 
         return 124
     finally:
         stop.set()
-        thread.join()
+        if thread is not None:
+            thread.join()
 
 
 def _run_once(now: datetime) -> None:
     today = now.date().isoformat()
-    _write_json(STATE_FILE, {"last_attempt": today, "started_at": now.isoformat(), "status": "running"})
+    previous = _read_state()
+    attempt_count = int(previous.get("attempt_count", 1)) + 1 if previous.get("last_attempt") == today else 1
+    _write_json(STATE_FILE, {"last_attempt": today, "attempt_count": attempt_count, "started_at": now.isoformat(), "status": "running"})
     args = [sys.executable, "-m", "apps.worker.daily_update", "--skip-electronic-universe"]
     print(f"NAS daily update started: {today}", flush=True)
-    exit_code = _run_with_heartbeat(args, timeout=4 * 3600)
+    exit_code = _run_with_heartbeat(args, timeout=4 * 3600, write_heartbeat=False)
     status = "ok" if exit_code == 0 else "timeout" if exit_code == 124 else "failed"
     _write_json(STATE_FILE, {
         "last_attempt": today,
+        "attempt_count": attempt_count,
         "finished_at": datetime.now(ZONE).isoformat(),
         "status": status,
         "exit_code": exit_code,
@@ -152,6 +157,18 @@ def _is_due(now: datetime, *, hour: int, minute: int, last_attempt: str | None) 
     )
 
 
+def _daily_is_due(now: datetime, state: dict, *, hour: int, minute: int) -> bool:
+    if _is_due(now, hour=hour, minute=minute, last_attempt=state.get("last_attempt")):
+        return True
+    return (
+        now.weekday() < 5
+        and (now.hour, now.minute) >= (hour, minute)
+        and state.get("last_attempt") == now.date().isoformat()
+        and state.get("status") == "running"
+        and int(state.get("attempt_count", 1)) < 2
+    )
+
+
 def _broker_import_slot(
     now: datetime,
     state: dict,
@@ -186,11 +203,13 @@ def main() -> int:
     if not all(0 <= h <= 23 and 0 <= m <= 59 for h, m in ((hour, minute), (event_hour, event_minute), (evening_hour, evening_minute), (broker_hour, broker_minute), (late_hour, late_minute))):
         raise ValueError("Scheduler times must be HH:MM")
     print(f"NAS scheduler ready; daily data weekdays {hour:02d}:{minute:02d}, company events daily {event_hour:02d}:{event_minute:02d} and {evening_hour:02d}:{evening_minute:02d}, broker import daily {broker_hour:02d}:{broker_minute:02d} and {late_hour:02d}:{late_minute:02d} Asia/Taipei", flush=True)
+    daily_thread: threading.Thread | None = None
     while True:
         now = datetime.now(ZONE)
         _write_json(HEARTBEAT_FILE, {"epoch": time.time(), "at": now.isoformat()})
-        if _is_due(now, hour=hour, minute=minute, last_attempt=_read_state().get("last_attempt")):
-            _run_once(now)
+        if (daily_thread is None or not daily_thread.is_alive()) and _daily_is_due(now, _read_state(), hour=hour, minute=minute):
+            daily_thread = threading.Thread(target=_run_once, args=(now,), daemon=True)
+            daily_thread.start()
         event_state = _read_state_file(EVENT_STATE_FILE)
         if (now.hour, now.minute) >= (evening_hour, evening_minute):
             if event_state.get("last_evening_attempt") != now.date().isoformat():
