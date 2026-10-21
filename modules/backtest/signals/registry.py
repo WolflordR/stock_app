@@ -25,6 +25,7 @@ from modules.backtest.signals.technical_patterns import (
 )
 from modules.backtest.signals.vcp import analyze_vcp_candidate
 from modules.backtest.signals.w_bottom import strategy_w_bottom_rebound
+from modules.backtest.strategy_config import DEEP_MARKET_CAP_PULLBACK_STRATEGY
 
 
 def _param(params, name, default=None):
@@ -135,14 +136,20 @@ def _evaluate_pullback_guard(df, _benchmark_df, params):
     }
 
 
-def _evaluate_high_price_pullback(df, _benchmark_df, params):
+def _evaluate_high_price_pullback(
+    df, _benchmark_df, params, *, lookback_days=None, eligible_symbol_set=None, rank_limit=None, min_drop_pct=None
+):
     setup = analyze_high_price_pullback_candidate(
         df,
-        lookback_days=_param(params, "high_price_pullback_lookback_days", 20),
-        eligible_symbol_set=_param(params, "high_price_pullback_eligible_symbol_set", set()),
+        lookback_days=lookback_days if lookback_days is not None else _param(params, "high_price_pullback_lookback_days", 20),
+        eligible_symbol_set=(
+            eligible_symbol_set
+            if eligible_symbol_set is not None
+            else _param(params, "high_price_pullback_eligible_symbol_set", set())
+        ),
         stock_id=_param(params, "stock_id"),
-        market_cap_rank_limit=_param(params, "high_price_pullback_market_cap_rank_limit", 50),
-        min_drop_pct=_param(params, "high_price_pullback_min_drop_pct", 15.0),
+        market_cap_rank_limit=rank_limit if rank_limit is not None else _param(params, "high_price_pullback_market_cap_rank_limit", 50),
+        min_drop_pct=min_drop_pct if min_drop_pct is not None else _param(params, "high_price_pullback_min_drop_pct", 15.0),
     )
     if not setup:
         return False, {}
@@ -159,6 +166,18 @@ def _evaluate_high_price_pullback(df, _benchmark_df, params):
         "high_price_pullback_condition_a": setup.get("condition_a"),
         "high_price_pullback_condition_b": setup.get("condition_b"),
     }
+
+
+def _evaluate_deep_market_cap_pullback(df, benchmark_df, params):
+    return _evaluate_high_price_pullback(
+        df,
+        benchmark_df,
+        params,
+        lookback_days=252,
+        eligible_symbol_set=_param(params, "deep_market_cap_pullback_eligible_symbol_set", set()),
+        rank_limit=50,
+        min_drop_pct=40.0,
+    )
 
 
 def _evaluate_near_breakout(df, _benchmark_df, params):
@@ -362,6 +381,7 @@ BUY_STRATEGY_REGISTRY = {
     "VCP 收斂突破": _evaluate_vcp,
     "強勢股回檔量縮止跌": _evaluate_pullback_guard,
     "高價股回檔": _evaluate_high_price_pullback,
+    DEEP_MARKET_CAP_PULLBACK_STRATEGY: _evaluate_deep_market_cap_pullback,
     "接近前高／即將突破": _evaluate_near_breakout,
     "碗形底＋帶量向上": _evaluate_bowl_bottom_volume,
     "動能向上＋量價配合": _evaluate_momentum_volume,
@@ -407,6 +427,8 @@ def get_buy_strategy_history_buffer_days(selected_strategies, selected_sell_stra
         history_buffer_days = max(history_buffer_days, 140)
     if "高價股回檔" in selected_strategies:
         history_buffer_days = max(history_buffer_days, 140)
+    if DEEP_MARKET_CAP_PULLBACK_STRATEGY in selected_strategies:
+        history_buffer_days = max(history_buffer_days, 450)
     if "接近前高／即將突破" in selected_strategies:
         history_buffer_days = max(history_buffer_days, 320)
     if "碗形底＋帶量向上" in selected_strategies:

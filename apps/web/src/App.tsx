@@ -2512,6 +2512,9 @@ function BacktestParamPanel({
             <ParamDecimal label="最小回檔 %" value={params.high_price_pullback_min_drop_pct} min={0.1} max={90} onValueChange={(value) => onParamsChange({ high_price_pullback_min_drop_pct: value })} />
           </>
         ) : null}
+        {strategy === "市值前五十大回檔超過40%" ? (
+          <p className="muted">固定條件：市值前 50 大，收盤價較近 252 個交易日最高價回檔超過 40%。</p>
+        ) : null}
         {strategy === "接近前高／即將突破" ? (
           <>
             <ParamNumber label="前高觀察天數" value={params.breakout_lookback_days} min={30} max={1260} onValueChange={(value) => onParamsChange({ breakout_lookback_days: value })} />
@@ -2556,11 +2559,15 @@ function BacktestParamPanel({
             <ParamDecimal label="收盤位置" value={params.initial_rise_min_close_position} min={0} max={1} onValueChange={(value) => onParamsChange({ initial_rise_min_close_position: value })} />
           </>
         ) : null}
-        <ParamNumber label="盤整天數" value={params.range_lookback_days} min={5} max={260} onValueChange={(value) => onParamsChange({ range_lookback_days: value })} />
-        <ParamDecimal label="盤整最大寬度 %" value={params.range_max_width_pct} min={1} max={200} onValueChange={(value) => onParamsChange({ range_max_width_pct: value })} />
-        <ParamDecimal label="量增倍率" value={params.range_volume_ratio} min={0.1} max={10} onValueChange={(value) => onParamsChange({ range_volume_ratio: value })} />
-        <ParamNumber label="量增連續天數" value={params.range_volume_sustain_days} min={1} max={30} onValueChange={(value) => onParamsChange({ range_volume_sustain_days: value })} />
-        <ParamNumber label="最小成交值" value={params.min_turnover_value} min={0} max={1000000000000} onValueChange={(value) => onParamsChange({ min_turnover_value: value })} />
+        {strategy !== "市值前五十大回檔超過40%" ? (
+          <>
+            <ParamNumber label="盤整天數" value={params.range_lookback_days} min={5} max={260} onValueChange={(value) => onParamsChange({ range_lookback_days: value })} />
+            <ParamDecimal label="盤整最大寬度 %" value={params.range_max_width_pct} min={1} max={200} onValueChange={(value) => onParamsChange({ range_max_width_pct: value })} />
+            <ParamDecimal label="量增倍率" value={params.range_volume_ratio} min={0.1} max={10} onValueChange={(value) => onParamsChange({ range_volume_ratio: value })} />
+            <ParamNumber label="量增連續天數" value={params.range_volume_sustain_days} min={1} max={30} onValueChange={(value) => onParamsChange({ range_volume_sustain_days: value })} />
+            <ParamNumber label="最小成交值" value={params.min_turnover_value} min={0} max={1000000000000} onValueChange={(value) => onParamsChange({ min_turnover_value: value })} />
+          </>
+        ) : null}
         {mode === "歷史回測" ? (
           <>
             <ParamNumber label="初始資金" value={params.initial_capital} min={1000} max={1000000000} onValueChange={(value) => onParamsChange({ initial_capital: value })} />

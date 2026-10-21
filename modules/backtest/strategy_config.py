@@ -1,3 +1,6 @@
+DEEP_MARKET_CAP_PULLBACK_STRATEGY = "市值前五十大回檔超過40%"
+
+
 BUY_STRATEGY_METADATA = {
     "強勢股回檔量縮止跌": {
         "title": "🛟 強勢股回檔收盤守住",
@@ -13,6 +16,11 @@ BUY_STRATEGY_METADATA = {
         "title": "💎 大市值回檔",
         "summary": "前 50 大市值公司，且距近 20 日高點回檔超過 15%",
         "description": "專門找大型權值股從近 20 日高點明顯回檔的名單，預設只要求市值夠大、回檔夠深。",
+    },
+    DEEP_MARKET_CAP_PULLBACK_STRATEGY: {
+        "title": "📉 市值前五十大回檔超過 40%",
+        "summary": "市值前 50 大公司，收盤價距近 252 個交易日高點跌逾 40%",
+        "description": "以掃描日期的估算市值取前 50 大，再比較最新收盤與近 252 個交易日最高價；回檔率＝（高點－收盤）／高點，須嚴格大於 40%。",
     },
     "接近前高／即將突破": {
         "title": "📍 接近前高",

@@ -126,7 +126,7 @@ def analyze_high_price_pullback_candidate(
     if recent_high <= 0:
         return None
 
-    pullback_depth_pct = (recent_high / current_close - 1.0) * 100 if current_close > 0 else 0.0
+    pullback_depth_pct = (recent_high - current_close) / recent_high * 100 if current_close > 0 else 0.0
     normalized_stock_id = str(stock_id or "").strip().upper()
     normalized_code = normalized_stock_id.split(".")[0] if normalized_stock_id else ""
     eligible_symbol_set = {str(value).strip().upper() for value in (eligible_symbol_set or set()) if str(value).strip()}

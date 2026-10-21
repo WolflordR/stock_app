@@ -14,6 +14,7 @@ from modules.data_sources.stock_db import ensure_stock_db, get_securities_in_ran
 from modules.industry.company_links_db import get_company_profiles_df
 from modules.industry.industry_taxonomy import TECH_INDUSTRY_NAMES
 from modules.backtest.strategy_signals import get_history_buffer_days
+from modules.backtest.strategy_config import DEEP_MARKET_CAP_PULLBACK_STRATEGY
 
 
 logger = logging.getLogger(__name__)
@@ -237,6 +238,8 @@ def check_stock(
     initial_rise_breakout_days=10,
     initial_rise_min_close_position=0.7,
     history_buffer_days=120,
+    *,
+    deep_market_cap_pullback_eligible_symbol_set=None,
 ):
     try:
         selected_sell_strategies = selected_sell_strategies or []
@@ -292,6 +295,7 @@ def check_stock(
             "high_price_pullback_market_cap_rank_limit": high_price_pullback_market_cap_rank_limit,
             "high_price_pullback_min_drop_pct": high_price_pullback_min_drop_pct,
             "high_price_pullback_eligible_symbol_set": high_price_pullback_eligible_symbol_set or set(),
+            "deep_market_cap_pullback_eligible_symbol_set": deep_market_cap_pullback_eligible_symbol_set or set(),
             "breakout_lookback_days": breakout_lookback_days,
             "breakout_distance_pct": breakout_distance_pct,
             "breakout_trend_lookback_days": breakout_trend_lookback_days,
@@ -344,7 +348,7 @@ def check_stock(
 
                 if not in_position:
                     turnover_value = _estimate_turnover_value(current_row)
-                    if turnover_value < min_turnover_value:
+                    if turnover_value < min_turnover_value and selected_strategies != [DEEP_MARKET_CAP_PULLBACK_STRATEGY]:
                         continue
                     matched, buy_setup = evaluate_registered_buy_strategies(
                         current_slice,
@@ -460,7 +464,7 @@ def check_stock(
         if matched:
             latest_volume = float(df["Volume"].iloc[-1]) if "Volume" in df.columns else 0.0
             latest_turnover_value = _estimate_turnover_value(df.iloc[-1])
-            if latest_turnover_value < min_turnover_value:
+            if latest_turnover_value < min_turnover_value and selected_strategies != [DEEP_MARKET_CAP_PULLBACK_STRATEGY]:
                 return None
             return {
                 "name": get_chinese_name(stock_id),
@@ -726,7 +730,6 @@ def scan_market(
     ensure_stock_db()
     picked_dict = {}
     securities = get_securities_in_range(start_num, end_num)
-    total_stocks = len(securities)
     history_buffer_days = get_history_buffer_days(
         selected_strategies,
         selected_sell_strategies=selected_sell_strategies,
@@ -734,6 +737,7 @@ def scan_market(
     )
     benchmark_df = None
     market_cap_leader_symbol_set = frozenset()
+    deep_market_cap_leader_symbol_set = frozenset()
 
     if "相對強弱濾網" in selected_strategies:
         benchmark_df = fetch_price_history(
@@ -750,7 +754,17 @@ def scan_market(
             trade_date_text,
             high_price_pullback_market_cap_rank_limit,
         )
+    if DEEP_MARKET_CAP_PULLBACK_STRATEGY in selected_strategies:
+        trade_date_text = _resolve_scan_trade_date_text(mode=mode, end_date=end_date)
+        deep_market_cap_leader_symbol_set = _load_market_cap_leader_symbol_set(trade_date_text, 50)
 
+    if selected_strategies == [DEEP_MARKET_CAP_PULLBACK_STRATEGY]:
+        securities = [
+            security for security in securities
+            if str(security["yfinance_symbol"]).strip().upper() in deep_market_cap_leader_symbol_set
+            or str(security["yfinance_symbol"]).strip().upper().split(".")[0] in deep_market_cap_leader_symbol_set
+        ]
+    total_stocks = len(securities)
     if total_stocks == 0:
         return picked_dict
 
@@ -843,6 +857,7 @@ def scan_market(
             initial_rise_breakout_days,
             initial_rise_min_close_position,
             history_buffer_days,
+            deep_market_cap_pullback_eligible_symbol_set=deep_market_cap_leader_symbol_set,
         )
 
         if result is not None:

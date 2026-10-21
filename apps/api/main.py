@@ -45,6 +45,7 @@ from modules.core.settings import SETTINGS
 from modules.core.job_store import SQLiteJobStore
 from modules.backtest.backtest_models import BacktestScanRequest
 from modules.backtest.backtest_service import validate_backtest_request
+from modules.backtest.strategy_config import DEEP_MARKET_CAP_PULLBACK_STRATEGY
 from modules.news.news_analysis import build_news_analysis_bundle
 from modules.data_sources.official_broker_import import get_official_broker_db_overview
 from modules.data_sources.broker_branch_stocks import list_broker_branch_stocks
@@ -653,7 +654,12 @@ if app is not None:
 
     @app.post("/api/backtest/jobs")
     def start_backtest_job(request_body: BacktestStartRequest) -> dict[str, object]:
-        if os.getenv("TRADE_ENABLE_BACKTEST", "1").strip().lower() in {"0", "false", "no"}:
+        backtest_disabled = os.getenv("TRADE_ENABLE_BACKTEST", "1").strip().lower() in {"0", "false", "no"}
+        allowed_nas_screen = (
+            request_body.mode == "即時選股"
+            and request_body.selected_strategies == [DEEP_MARKET_CAP_PULLBACK_STRATEGY]
+        )
+        if backtest_disabled and not allowed_nas_screen:
             raise HTTPException(status_code=503, detail="Backtesting is disabled on this NAS")
         request = request_body.to_scan_request()
         validation_error = validate_backtest_request(request)
