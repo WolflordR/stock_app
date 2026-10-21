@@ -161,8 +161,8 @@ def list_market_map_topic_members(topic_name: str, limit: int = 80) -> list[dict
     return _rows_to_dicts(rows)
 
 
-def list_broker_branches(search_text: str | None = None, limit: int = 80) -> list[dict[str, Any]]:
-    frame = list_official_broker_branches(search_text=search_text, limit=limit)
+def list_broker_branches(search_text: str | None = None, limit: int = 80, trade_date: str | None = None) -> list[dict[str, Any]]:
+    frame = list_official_broker_branches(search_text=search_text, trade_date=trade_date, limit=limit)
     if frame.empty:
         return []
     return _json_safe(frame.to_dict("records"))

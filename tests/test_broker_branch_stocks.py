@@ -3,7 +3,7 @@ from datetime import date, timedelta
 
 import pytest
 
-from modules.data_sources.broker_branch_stocks import list_broker_branch_stocks
+from modules.data_sources.broker_branch_stocks import list_broker_branch_stocks, list_broker_trade_dates
 
 
 def _fixtures(tmp_path):
@@ -84,3 +84,19 @@ def test_volume_ratio_needs_five_prior_trading_observations(tmp_path):
     row = next(row for row in result["rows"] if row["stock_code"] == "1103")
     assert row["stock_volume_shares"] == 1000
     assert row["volume_ratio"] is None
+
+
+def test_trade_date_choices_come_from_imported_reports(tmp_path):
+    broker, _, _ = _fixtures(tmp_path)
+    with sqlite3.connect(broker) as conn:
+        conn.execute("CREATE TABLE broker_trade_reports(market TEXT,trade_date TEXT,stock_code TEXT)")
+        conn.executemany("INSERT INTO broker_trade_reports VALUES(?,?,?)", [
+            ("TWSE", "2026-10-08", "1101"),
+            ("TWSE", "2026-10-08", "1102"),
+            ("TWSE", "2026-10-07", "1101"),
+            ("TPEX", "2026-10-06", "1234"),
+        ])
+    assert list_broker_trade_dates(broker_db=broker) == ["2026-10-08", "2026-10-07", "2026-10-06"]
+    assert list_broker_trade_dates(broker_db=broker, limit=1) == ["2026-10-08"]
+    assert list_broker_trade_dates(broker_db=broker, market="TWSE") == ["2026-10-08", "2026-10-07"]
+    assert list_broker_trade_dates(broker_db=broker, market="TPEx") == ["2026-10-06"]

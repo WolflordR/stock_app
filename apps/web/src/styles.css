@@ -2850,6 +2850,14 @@ h1 {
 .market-limit-sources { display: grid; gap: 5px; margin-top: 15px; color: #aeb8be; font-size: .73rem; }
 .market-limit-sources a { color: #a7e9dc; }
 .broker-activity-toolbar { justify-content: flex-start; align-items: flex-start; flex-wrap: wrap; gap: 10px 22px; }
+.broker-date-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 14px; color: #aeb8be; font-size: .8rem; }
+.broker-date-controls label { margin-right: 4px; font-weight: 650; color: #ecf1f4; }
+.broker-date-controls input, .broker-date-controls button { min-height: 34px; border: 1px solid rgba(236,241,244,.18); border-radius: 5px; background: #23292d; color: #ecf1f4; padding: 5px 9px; font: inherit; }
+.broker-date-controls input { color-scheme: dark; }
+.broker-date-controls button { cursor: pointer; }
+.broker-date-controls button:hover:not(:disabled) { border-color: rgba(111,231,197,.5); }
+.broker-date-controls button:disabled { opacity: .45; cursor: default; }
+.broker-date-controls span { color: #9eabb2; }
 .broker-sort-tabs { max-width: 100%; }
 .broker-activity-table { min-width: 1100px; }
 .broker-activity-table th, .broker-activity-table td { text-align: right; }

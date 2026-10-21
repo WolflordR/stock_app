@@ -547,6 +547,7 @@ def list_official_broker_branches(
     *,
     search_text: str | None = None,
     market: str | None = None,
+    trade_date: str | None = None,
     limit: int = 200,
 ) -> pd.DataFrame:
     init_official_broker_db()
@@ -559,10 +560,11 @@ def list_official_broker_branches(
         WITH latest AS (
             SELECT market, MAX(trade_date) AS trade_date
             FROM broker_trade_reports
-            WHERE (? IS NULL OR market = ?)
+            WHERE (? IS NULL OR market = ?) AND (? IS NULL OR trade_date = ?)
             GROUP BY market
         )
         SELECT
+            CASE WHEN lines.market = 'TPEX' THEN 'TPEx' ELSE lines.market END AS market,
             lines.broker_name,
             COUNT(DISTINCT lines.trade_date) AS trade_days,
             COUNT(DISTINCT lines.stock_code) AS stock_count,
@@ -575,7 +577,7 @@ def list_official_broker_branches(
         WHERE lines.market = latest.market AND lines.trade_date = latest.trade_date
           AND lines.broker_name != ''
           AND (? = '%%' OR lines.broker_name LIKE ?)
-        GROUP BY lines.broker_name
+        GROUP BY lines.market, lines.broker_name
         ORDER BY ABS(total_net_shares) DESC, last_trade_date DESC, broker_name ASC
         LIMIT ?
     """
@@ -583,7 +585,7 @@ def list_official_broker_branches(
         frame = pd.read_sql_query(
             query,
             conn,
-            params=(market_filter, market_filter, search_value, search_value, int(limit)),
+            params=(market_filter, market_filter, trade_date, trade_date, search_value, search_value, int(limit)),
         )
 
     if frame.empty:

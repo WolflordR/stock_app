@@ -35,6 +35,7 @@ import {
   fetchBacktestJob,
   fetchBacktestConfig,
   fetchBrokerBranches,
+  fetchBrokerTradeDates,
   fetchDataSourcesOverview,
   fetchDashboardOverview,
   fetchLatestPriceCacheJob,
@@ -303,7 +304,12 @@ export function App() {
   const [marketMembers, setMarketMembers] = useState<MarketMapMember[]>([]);
 
   const [brokerSearch, setBrokerSearch] = useState("");
+  const [brokerDate, setBrokerDate] = useState("");
+  const [brokerTradeDates, setBrokerTradeDates] = useState<string[]>([]);
   const [brokerBranches, setBrokerBranches] = useState<BrokerBranch[]>([]);
+  const [brokerLoading, setBrokerLoading] = useState(false);
+  const [brokerListError, setBrokerListError] = useState("");
+  const brokerLoadSeq = useRef(0);
   const [selectedBrokerBranch, setSelectedBrokerBranch] = useState<BrokerBranch | null>(null);
   const [brokerBranchRefresh, setBrokerBranchRefresh] = useState(0);
 
@@ -383,14 +389,18 @@ export function App() {
     setLoadState("loading");
     setErrorMessage("");
     try {
-      const [nextOverview, nextMarketGroups, nextBrokerBranches] = await Promise.all([
+      const [nextOverview, nextMarketGroups, nextBrokerTradeDates] = await Promise.all([
         fetchDashboardOverview(),
         fetchMarketMapGroups(),
-        fetchBrokerBranches()
+        fetchBrokerTradeDates().catch(() => [])
       ]);
+      const nextBrokerDate = brokerDate || nextBrokerTradeDates[0] || nextOverview.sections.broker.data?.latest_trade_date || "";
+      const nextBrokerBranches = await fetchBrokerBranches(brokerSearch, nextBrokerDate);
       setOverview(nextOverview);
       setMarketGroups(nextMarketGroups);
+      setBrokerDate(nextBrokerDate);
       setBrokerBranches(nextBrokerBranches);
+      setBrokerTradeDates(nextBrokerTradeDates);
 
       const defaultGroup = selectedGroup || nextMarketGroups[0]?.group_name || "";
       setSelectedGroup(defaultGroup);
@@ -577,8 +587,24 @@ export function App() {
     }
   }
 
-  async function loadBrokerBranches(nextSearch = brokerSearch) {
-    setBrokerBranches(await fetchBrokerBranches(nextSearch));
+  async function loadBrokerBranches(nextSearch = brokerSearch, nextDate = brokerDate) {
+    const sequence = ++brokerLoadSeq.current;
+    setBrokerLoading(true);
+    setBrokerListError("");
+    setBrokerBranches([]);
+    try {
+      const branches = await fetchBrokerBranches(nextSearch, nextDate);
+      if (sequence === brokerLoadSeq.current) setBrokerBranches(branches);
+    } catch (error) {
+      if (sequence === brokerLoadSeq.current) setBrokerListError(error instanceof Error ? error.message : "分點列表讀取失敗");
+    } finally {
+      if (sequence === brokerLoadSeq.current) setBrokerLoading(false);
+    }
+  }
+
+  function handleBrokerDateChange(nextDate: string) {
+    setBrokerDate(nextDate);
+    void loadBrokerBranches(brokerSearch, nextDate);
   }
 
   async function loadUsMarketCalendar(
@@ -1013,17 +1039,22 @@ export function App() {
         {activeView === "broker" ? (
           <BrokerView
             brokerSearch={brokerSearch}
+            brokerDate={brokerDate || broker?.latest_trade_date || ""}
+            brokerTradeDates={brokerTradeDates}
             brokerOverview={broker}
             brokerBranches={brokerBranches}
+            brokerLoading={brokerLoading}
+            brokerListError={brokerListError}
             onSearchChange={setBrokerSearch}
             onSearchSubmit={handleBrokerSubmit}
+            onDateChange={handleBrokerDateChange}
             onBranchSelect={(branch) => { setSelectedBrokerBranch(branch); navigateToView("brokerBranch"); }}
           />
         ) : null}
 
         {selectedBrokerBranch ? (
           <div hidden={activeView !== "brokerBranch"}>
-            <BrokerBranchStocksView key={`${selectedBrokerBranch.broker_name}-${selectedBrokerBranch.last_trade_date}-${brokerBranchRefresh}`} branch={selectedBrokerBranch} onStockSelect={(code, codes) => openStockDetail(code, { sourceLabel: `${selectedBrokerBranch.broker_name}分點`, codes: uniqueCodes(codes) })} />
+            <BrokerBranchStocksView key={`${selectedBrokerBranch.market}-${selectedBrokerBranch.broker_name}-${selectedBrokerBranch.last_trade_date}-${brokerBranchRefresh}`} branch={selectedBrokerBranch} onStockSelect={(code, codes) => openStockDetail(code, { sourceLabel: `${selectedBrokerBranch.broker_name}分點`, codes: uniqueCodes(codes) })} />
           </div>
         ) : null}
 
@@ -1942,19 +1973,32 @@ function MarketMapView({
 
 function BrokerView({
   brokerSearch,
+  brokerDate,
+  brokerTradeDates,
   brokerOverview,
   brokerBranches,
+  brokerLoading,
+  brokerListError,
   onSearchChange,
   onSearchSubmit,
+  onDateChange,
   onBranchSelect
 }: {
   brokerSearch: string;
+  brokerDate: string;
+  brokerTradeDates: string[];
   brokerOverview: DashboardOverview["sections"]["broker"]["data"] | undefined;
   brokerBranches: BrokerBranch[];
+  brokerLoading: boolean;
+  brokerListError: string;
   onSearchChange: (value: string) => void;
   onSearchSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onDateChange: (date: string) => void;
   onBranchSelect: (branch: BrokerBranch) => void;
 }) {
+  const previousDate = brokerTradeDates.find((date) => date < brokerDate);
+  const latestDate = brokerTradeDates[0] || brokerOverview?.latest_trade_date || "";
+  const nextDate = [...brokerTradeDates].reverse().find((date) => date > brokerDate && date <= latestDate);
   return (
     <>
       <section className="status-grid">
@@ -1967,7 +2011,14 @@ function BrokerView({
           <Search size={20} />
           <h2>券商分點列表</h2>
         </div>
-        <p className="broker-list-note">列表檔數與買賣超張數依各市場最新匯入交易日統計；點選分點後顯示該分點該日的逐檔明細。</p>
+        <p className="broker-list-note">列表檔數與買賣超張數依所選交易日統計；點選分點後顯示該日逐檔明細。</p>
+        <div className="broker-date-controls" role="group" aria-label="分點列表交易日期">
+          <label htmlFor="broker-list-date">交易日期</label>
+          <button type="button" disabled={!previousDate} onClick={() => previousDate && onDateChange(previousDate)}>前一交易日</button>
+          <input id="broker-list-date" type="date" value={brokerDate} max={latestDate || undefined} onChange={(event) => event.target.value && onDateChange(event.target.value)} />
+          <button type="button" disabled={!nextDate} onClick={() => nextDate && onDateChange(nextDate)}>後一交易日</button>
+          <button type="button" disabled={brokerDate === latestDate} onClick={() => latestDate && onDateChange(latestDate)}>最新</button>
+        </div>
         <form className="stock-search" onSubmit={onSearchSubmit}>
           <input value={brokerSearch} onChange={(event) => onSearchChange(event.target.value)} placeholder="搜尋券商分點" aria-label="Broker search" />
           <button type="submit">搜尋</button>
@@ -1975,12 +2026,16 @@ function BrokerView({
         <div className="broker-list">
           {brokerBranches.length ? (
             brokerBranches.map((branch) => (
-              <button className="broker-list-row broker-list-button" type="button" key={branch.broker_name} onClick={() => onBranchSelect(branch)} aria-label={`查看${branch.broker_name}買賣超股票`} title={`最後匯入交易日 ${branch.last_trade_date}`}>
-                <strong>{branch.broker_name}</strong>
+              <button className="broker-list-row broker-list-button" type="button" key={`${branch.market}-${branch.broker_name}`} onClick={() => onBranchSelect(branch)} aria-label={`查看${branch.broker_name}買賣超股票`} title={`交易日 ${branch.last_trade_date}`}>
+                <strong>{branch.broker_name} <small>{branch.market === "TWSE" ? "上市" : "上櫃"}</small></strong>
                 <span>{branch.stock_count.toLocaleString()} 檔</span>
                 <em>{formatShares(branch.total_net_shares)}</em>
               </button>
             ))
+          ) : brokerLoading ? (
+            <p className="muted" aria-busy="true">正在讀取所選日期的分點資料…</p>
+          ) : brokerListError ? (
+            <p className="muted" role="alert">{brokerListError}</p>
           ) : (
             <p className="muted">目前本地官方分點資料庫沒有可列出的分點。</p>
           )}

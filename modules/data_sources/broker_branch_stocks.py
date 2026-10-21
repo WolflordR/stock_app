@@ -26,6 +26,29 @@ def _connect_readonly(path: Path) -> sqlite3.Connection:
     return conn
 
 
+def list_broker_trade_dates(*, market: str = "all", limit: int = 2000, broker_db: Path | None = None) -> list[str]:
+    """List imported report dates without scanning the much larger trade-line table."""
+    if market not in {"all", "TWSE", "TPEx"} or not 1 <= limit <= 2000:
+        raise ValueError("Invalid broker trade date selection")
+    path = Path(broker_db or db_path("broker_daily_trades.db"))
+    if not path.exists():
+        return []
+    markets = ("TWSE", "TPEX") if market == "all" else (("TPEX",) if market == "TPEx" else ("TWSE",))
+    with closing(_connect_readonly(path)) as conn:
+        dates = set()
+        try:
+            for stored_market in markets:
+                dates.update(str(row["trade_date"]) for row in conn.execute(
+                    "SELECT DISTINCT trade_date FROM broker_trade_reports WHERE market=? ORDER BY trade_date DESC LIMIT ?",
+                    (stored_market, limit),
+                ))
+        except sqlite3.OperationalError as exc:
+            if "no such table" not in str(exc):
+                raise
+            return []
+    return sorted(dates, reverse=True)[:limit]
+
+
 def _quoted_metrics(history: list[dict[str, Any]], trade_date: str) -> dict[str, float | None]:
     """The ratio uses the preceding five positive-volume trading observations."""
     ordered = sorted(

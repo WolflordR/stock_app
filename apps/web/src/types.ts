@@ -52,6 +52,7 @@ export type BrokerOverview = {
 };
 
 export type BrokerBranch = {
+  market: "TWSE" | "TPEx";
   broker_name: string;
   trade_days: number;
   stock_count: number;

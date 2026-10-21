@@ -34,3 +34,7 @@ def test_broker_list_and_overview_read_latest_imported_day_only(tmp_path, monkey
     assert set(branches["broker_name"]) == {"台北", "高雄"}
     assert branches.set_index("broker_name").loc["台北", "total_net_shares"] == 1000
     assert list(broker.list_official_broker_branches(search_text="上櫃")["broker_name"]) == ["上櫃分點"]
+    assert list(broker.list_official_broker_branches(search_text="上櫃")["market"]) == ["TPEx"]
+    old_branches = broker.list_official_broker_branches(market="TWSE", trade_date="2026-10-07")
+    assert list(old_branches["broker_name"]) == ["舊分點"]
+    assert old_branches.iloc[0]["last_trade_date"] == "2026-10-07"

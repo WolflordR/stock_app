@@ -48,7 +48,7 @@ from modules.backtest.backtest_service import validate_backtest_request
 from modules.backtest.strategy_config import DEEP_MARKET_CAP_PULLBACK_STRATEGY
 from modules.news.news_analysis import build_news_analysis_bundle
 from modules.data_sources.official_broker_import import get_official_broker_db_overview
-from modules.data_sources.broker_branch_stocks import list_broker_branch_stocks
+from modules.data_sources.broker_branch_stocks import list_broker_branch_stocks, list_broker_trade_dates
 from modules.data_sources.financial_trends import get_stock_financial_trends
 from modules.data_sources.stock_db import find_security, get_securities_in_range, get_stock_db_status, search_securities
 from modules.data_sources.chip_trends import market_history, stock_margin_history, ownership_history
@@ -578,9 +578,17 @@ if app is not None:
     @app.get("/api/broker/branches")
     def broker_branches(
         search_text: str | None = Query(default=None),
+        trade_date: date | None = Query(default=None),
         limit: int = Query(default=80, ge=1, le=300),
     ) -> list[dict[str, object]]:
-        return list_broker_branches(search_text=search_text, limit=limit)
+        return list_broker_branches(search_text=search_text, trade_date=trade_date.isoformat() if trade_date else None, limit=limit)
+
+    @app.get("/api/broker/trade-dates")
+    def broker_trade_dates(
+        market: str = Query(default="all", pattern="^(all|TWSE|TPEx)$"),
+        limit: int = Query(default=2000, ge=1, le=2000),
+    ) -> list[str]:
+        return list_broker_trade_dates(market=market, limit=limit)
 
     @app.get("/api/broker/branch-stocks")
     def broker_branch_stocks(

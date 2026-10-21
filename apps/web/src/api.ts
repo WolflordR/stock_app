@@ -375,16 +375,22 @@ export function fetchMarketMapMembers(topicName: string): Promise<MarketMapMembe
   return requestJson<MarketMapMember[]>(`/api/market-map/topics/${encodeURIComponent(topicName)}/members`);
 }
 
-export function fetchBrokerBranches(searchText = ""): Promise<BrokerBranch[]> {
+export function fetchBrokerBranches(searchText = "", tradeDate = ""): Promise<BrokerBranch[]> {
   const params = new URLSearchParams();
   if (searchText.trim()) params.set("search_text", searchText.trim());
+  if (tradeDate) params.set("trade_date", tradeDate);
   params.set("limit", "80");
   return requestJson<BrokerBranch[]>(`/api/broker/branches?${params.toString()}`);
+}
+
+export function fetchBrokerTradeDates(market: "all" | "TWSE" | "TPEx" = "all"): Promise<string[]> {
+  return requestJson<string[]>(`/api/broker/trade-dates?market=${market}&limit=2000`);
 }
 
 export function fetchBrokerBranchStocks(
   brokerName: string,
   tradeDate: string,
+  market: BrokerBranch["market"],
   side: "buy" | "sell",
   sortBy: BrokerBranchStocks["sort_by"],
   descending: boolean,
@@ -394,6 +400,7 @@ export function fetchBrokerBranchStocks(
   const params = new URLSearchParams({
     broker_name: brokerName,
     trade_date: tradeDate,
+    market,
     side,
     sort_by: sortBy,
     descending: String(descending),
